@@ -227,7 +227,7 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 | `edit id` | `$EDITOR`, then lint |
 | `move id --before/--after/--top` | rerank, one file |
 | `take id` | pull, set assignee + doing, commit, push (push is the lock) |
-| `done id` | status done; warns on unchecked acceptance |
+| `done id` | status done; blocks (exit 3) on unchecked acceptance (D17) |
 | `check id n` | tick acceptance item n (D13) |
 | `note id "text"` | append to Notes (D13) |
 | `set id --priority/--type/--label/--status/--title` | change one field (D13) |
@@ -301,6 +301,19 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 - **D14 (foreman 22:40, reversible) the shared git package is public:**
   `github.com/veridit/huginn/gitbranch` (top-level, not `internal/`), so
   muninn can import it for its own `muninn` branch.
+- **D15 (foreman 22:53, from D13) `move` always succeeds.** When no key fits
+  between the neighbours (`A` vs `A0`, tied keys) or the key would pass 12
+  chars, huginn re-keys the smallest contiguous window around the insertion
+  point, as pure renames in the same commit, and reports the renamed ids.
+  `huginn rebalance` exists for humans; agents never need it.
+- **D16 (foreman 22:53) `next --mine`** = assigned to me, `doing` before
+  `todo`, unblocked, then rank. Plain `next` stays untaken `todo` only.
+- **D17 (foreman 22:53, user rule "agents ignore warnings, so block")**
+  `done` with unchecked acceptance blocks, exit 3, listing each item with
+  `huginn check <id> <n>`. `acceptance = "block" | "warn"` in huginn.toml.
+  No `--force`. `drop` is always allowed.
+- **D18 (foreman 22:53)** the cache stores dep edges by canonical id;
+  unresolvable refs stay as dangling rows for lint.
 
 ## Build plan (approved 22:36, lanes started)
 
