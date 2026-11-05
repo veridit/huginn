@@ -15,6 +15,13 @@ func (e *SpaceError) Error() string {
 }
 func Between(a, b string) (string, error) {
 	originalA, originalB := a, b
+	for _, key := range []string{a, b} {
+		for i := 0; i < len(key); i++ {
+			if strings.IndexByte(Alphabet, key[i]) < 0 {
+				return "", &SpaceError{a, b}
+			}
+		}
+	}
 	if b != "" && a >= b {
 		return "", &SpaceError{a, b}
 	}

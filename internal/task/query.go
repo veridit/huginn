@@ -197,15 +197,17 @@ func Sort(tasks []Task) {
 func Lint(docs []*Document) []Finding {
 	var out []Finding
 	var tasks []Task
-	seen := map[string]bool{}
+	counts := map[string]int{}
+	for _, d := range docs {
+		counts[d.Task.ID]++
+	}
 	for _, d := range docs {
 		out = append(out, d.Findings...)
 		t := d.Task
 		tasks = append(tasks, t)
-		if seen[t.ID] {
+		if t.ID != "" && counts[t.ID] > 1 {
 			out = append(out, Finding{t.Path, 1, "duplicate id " + t.ID})
 		}
-		seen[t.ID] = true
 	}
 	adj := map[string][]string{}
 	for _, t := range tasks {

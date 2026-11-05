@@ -135,6 +135,11 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 		if e != nil {
 			return stats, e
 		}
+		if head != c.head && c.head == "" && !c.rebuild {
+			for path := range c.files {
+				forced[path] = true
+			}
+		}
 		if head != c.head && c.head != "" && !c.rebuild {
 			changes, e := c.git.Diff(ctx, c.head, head)
 			if e != nil {
