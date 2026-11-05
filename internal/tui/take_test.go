@@ -8,6 +8,20 @@ import (
 	"github.com/veridit/huginn/internal/task"
 )
 
+func TestTransactionalRaceRefreshesWinner(t *testing.T) {
+	m := fixture(t)
+	m.opts.Take = func(ref string) (task.Result, error) {
+		if _, err := m.store.Take(ref, "alice"); err != nil {
+			t.Fatal(err)
+		}
+		return task.Result{}, errors.New("taken by alice")
+	}
+	m = press(m, "t")
+	if m.message != "taken by alice" || !contains(m.visible[0].Assignee, "alice") || m.visible[0].Status != "doing" {
+		t.Fatal(m.View())
+	}
+}
+
 func TestTransactionalTakeOwnsCommit(t *testing.T) {
 	m := fixture(t)
 	id := m.visible[0].ID

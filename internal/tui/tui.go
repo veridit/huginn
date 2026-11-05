@@ -124,6 +124,11 @@ func (m model) selected() (task.Task, bool) {
 }
 func (m *model) finish(r task.Result, err error, action string) {
 	if err != nil {
+		path := ""
+		if t, ok := m.selected(); ok {
+			path = t.Path
+		}
+		m.refresh(path)
 		m.message = err.Error()
 		return
 	}
