@@ -34,21 +34,35 @@ type Acceptance struct {
 	Line    int
 }
 type Task struct {
-	ID, Path, Group, Rank, Slug, Title, Status, Type, Priority, Created, Updated string
-	Assignee, Labels, Aliases                                                    []string
-	Goal                                                                         string
-	Dependencies                                                                 []Dependency
-	Acceptance                                                                   []Acceptance
+	ID           string       `json:"id"`
+	Path         string       `json:"path"`
+	Group        string       `json:"group"`
+	Rank         string       `json:"rank"`
+	Slug         string       `json:"slug"`
+	Title        string       `json:"title"`
+	Status       string       `json:"status"`
+	Type         string       `json:"type"`
+	Priority     string       `json:"priority"`
+	Created      string       `json:"created"`
+	Updated      string       `json:"updated"`
+	Assignee     []string     `json:"assignee"`
+	Labels       []string     `json:"labels"`
+	Aliases      []string     `json:"aliases"`
+	Goal         string       `json:"goal"`
+	Dependencies []Dependency `json:"dependencies"`
+	Acceptance   []Acceptance `json:"acceptance"`
 }
 type Document struct {
-	Task     Task
-	raw      []byte
-	lines    []string
-	fields   map[string]int
-	sections map[string][2]int
-	Findings []Finding
-	frontEnd int
-	newline  string
+	Task             Task
+	raw              []byte
+	lines            []string
+	fields           map[string]int
+	fieldEnds        map[string]int
+	sections         map[string][2]int
+	Findings         []Finding
+	frontEnd         int
+	frontmatterValid bool
+	newline          string
 }
 
 func ParseName(path string) (r, i, s string, err error) {
@@ -87,7 +101,7 @@ func scalar(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "\"") {
 		var v string
-		if json.Unmarshal([]byte(s), &v) == nil {
+		if json.NewDecoder(strings.NewReader(s)).Decode(&v) == nil {
 			return v
 		}
 	}
@@ -96,6 +110,9 @@ func scalar(s string) string {
 	}
 	if n := strings.Index(s, " #"); n >= 0 {
 		s = s[:n]
+	}
+	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
+		return strings.ReplaceAll(s[1:len(s)-1], "''", "'")
 	}
 	return strings.TrimSpace(s)
 }
@@ -118,7 +135,7 @@ func list(s string) []string {
 	return out
 }
 func Parse(path string, data []byte) *Document {
-	d := &Document{raw: bytes.Clone(data), fields: map[string]int{}, sections: map[string][2]int{}, frontEnd: -1, newline: "\n"}
+	d := &Document{raw: bytes.Clone(data), fields: map[string]int{}, fieldEnds: map[string]int{}, sections: map[string][2]int{}, frontEnd: -1, newline: "\n"}
 	if bytes.Contains(data, []byte("\r\n")) {
 		d.newline = "\r\n"
 	}
@@ -141,44 +158,12 @@ func Parse(path string, data []byte) *Document {
 				d.frontEnd = n
 				break
 			}
-			k, v, ok := strings.Cut(line, ":")
-			if !ok || strings.TrimSpace(k) != k || k == "" {
-				if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "#") {
-					d.add(n+1, "malformed frontmatter line")
-				}
-				continue
-			}
-			if _, exists := d.fields[k]; exists {
-				d.add(n+1, "duplicate field "+k)
-			}
-			d.fields[k] = n
-			v = scalar(v)
-			switch k {
-			case "id":
-				d.Task.ID = v
-			case "title":
-				d.Task.Title = v
-			case "status":
-				d.Task.Status = v
-			case "type":
-				d.Task.Type = v
-			case "priority":
-				d.Task.Priority = v
-			case "assignee":
-				d.Task.Assignee = list(v)
-			case "labels":
-				d.Task.Labels = list(v)
-			case "aliases":
-				d.Task.Aliases = list(v)
-			case "created":
-				d.Task.Created = v
-			case "updated":
-				d.Task.Updated = v
-			}
 		}
 	}
 	if d.frontEnd < 0 {
 		d.add(1, "missing or unterminated frontmatter")
+	} else {
+		d.parseFrontmatter()
 	}
 	start := d.frontEnd + 1
 	if start < 0 {
@@ -186,13 +171,42 @@ func Parse(path string, data []byte) *Document {
 	}
 	section := ""
 	sectionStart := 0
+	fence := ""
+	seenSections := map[string]bool{}
 	for n := start; n < len(d.lines); n++ {
 		line := clean(d.lines[n])
+		trimmed := strings.TrimLeft(line, " ")
+		if len(line)-len(trimmed) <= 3 && (strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")) {
+			if section == "Goal" {
+				d.Task.Goal += d.lines[n]
+			}
+			if fence == "" {
+				ch := trimmed[0]
+				count := 0
+				for count < len(trimmed) && trimmed[count] == ch {
+					count++
+				}
+				fence = trimmed[:count]
+			} else if strings.HasPrefix(trimmed, fence) && strings.TrimSpace(strings.TrimPrefix(trimmed, fence)) == "" {
+				fence = ""
+			}
+			continue
+		}
+		if fence != "" {
+			if section == "Goal" {
+				d.Task.Goal += d.lines[n]
+			}
+			continue
+		}
 		if strings.HasPrefix(line, "## ") {
 			if section != "" {
 				d.sections[section] = [2]int{sectionStart, n}
 			}
 			section = strings.TrimSpace(line[3:])
+			if seenSections[section] && contains([]string{"Goal", "Depends on", "Acceptance", "Notes"}, section) {
+				d.add(n+1, "duplicate section "+section)
+			}
+			seenSections[section] = true
 			sectionStart = n
 			continue
 		}
@@ -216,10 +230,10 @@ func Parse(path string, data []byte) *Document {
 	if section != "" {
 		d.sections[section] = [2]int{sectionStart, len(d.lines)}
 	}
-	for _, k := range []string{"id", "title", "status"} {
-		n, ok := d.fields[k]
-		if !ok || scalar(strings.SplitN(clean(d.lines[n]), ":", 2)[1]) == "" {
-			d.add(1, "missing field "+k)
+	for _, field := range []struct{ k, v string }{{"id", d.Task.ID}, {"title", d.Task.Title}, {"status", d.Task.Status}} {
+		_, ok := d.fields[field.k]
+		if !ok || strings.TrimSpace(field.v) == "" {
+			d.add(1, "missing field "+field.k)
 		}
 	}
 	if !id.Valid(d.Task.ID) {
@@ -272,7 +286,7 @@ func (d *Document) replace(lines []string) {
 	*d = *fresh
 }
 func (d *Document) SetField(k string, value any) error {
-	if d.frontEnd < 0 {
+	if d.frontEnd < 0 || !d.frontmatterValid {
 		return &Error{Kind: "broken-file", ID: d.Task.ID, Fix: "huginn lint"}
 	}
 	b, e := json.Marshal(value)
@@ -282,7 +296,11 @@ func (d *Document) SetField(k string, value any) error {
 	lines := append([]string(nil), d.lines...)
 	line := k + ": " + string(b) + d.newline
 	if n, ok := d.fields[k]; ok {
-		lines[n] = line
+		end := d.fieldEnds[k]
+		if end <= n {
+			end = n + 1
+		}
+		lines = append(lines[:n], append([]string{line}, lines[end:]...)...)
 	} else {
 		n := d.frontEnd
 		lines = append(lines[:n], append([]string{line}, lines[n:]...)...)

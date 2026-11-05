@@ -83,6 +83,15 @@ func distance(a, b string) int {
 }
 func Resolve(tasks []Task, ref string) (Task, error) {
 	ref = strings.ToLower(ref)
+	var ids []Task
+	for _, t := range tasks {
+		if strings.EqualFold(t.ID, ref) {
+			ids = append(ids, t)
+		}
+	}
+	if len(ids) == 1 {
+		return ids[0], nil
+	}
 	var exact, prefix []Task
 	for _, t := range tasks {
 		hit := strings.EqualFold(t.ID, ref) || strings.EqualFold(t.Slug, ref)
@@ -94,6 +103,9 @@ func Resolve(tasks []Task, ref string) (Task, error) {
 		} else if ref != "" && strings.HasPrefix(strings.ToLower(t.ID), ref) {
 			prefix = append(prefix, t)
 		}
+	}
+	if len(ids) > 1 {
+		exact = ids
 	}
 	if len(exact) == 0 {
 		exact = prefix
@@ -114,6 +126,18 @@ func Resolve(tasks []Task, ref string) (Task, error) {
 
 // ResolveDependency deliberately accepts only exact ids and aliases, never slugs or prefixes.
 func ResolveDependency(tasks []Task, ref string) (Task, error) {
+	var ids []Task
+	for _, t := range tasks {
+		if strings.EqualFold(t.ID, ref) {
+			ids = append(ids, t)
+		}
+	}
+	if len(ids) == 1 {
+		return ids[0], nil
+	}
+	if len(ids) > 1 {
+		return Task{}, &Error{Kind: "duplicate-id", ID: ref, Fix: "huginn lint"}
+	}
 	var found []Task
 	for _, t := range tasks {
 		hit := strings.EqualFold(t.ID, ref)

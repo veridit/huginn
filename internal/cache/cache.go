@@ -45,12 +45,18 @@ type Cache struct {
 	git     Git
 	head    string
 	files   map[string]record
+	ordered []task.Task
 	rebuild bool
 }
 
 // Open takes the task worktree root and a database path, normally
 // filepath.Join(mainGitDir,"huginn","cache.db"). No state is written to task files.
 func Open(root, dbPath string, git Git) (*Cache, error) {
+	absRoot, e := filepath.Abs(root)
+	if e != nil {
+		return nil, e
+	}
+	root = filepath.Clean(absRoot)
 	if e := os.MkdirAll(filepath.Dir(dbPath), 0755); e != nil {
 		return nil, e
 	}
@@ -75,7 +81,7 @@ func Open(root, dbPath string, git Git) (*Cache, error) {
 			return fail(e)
 		}
 	}
-	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS tasks(id TEXT NOT NULL,path TEXT PRIMARY KEY,"group" TEXT,rank TEXT,slug TEXT,title TEXT,status TEXT,type TEXT,priority TEXT,assignee TEXT,updated TEXT,payload TEXT NOT NULL,findings TEXT NOT NULL); CREATE INDEX IF NOT EXISTS tasks_id ON tasks(id); CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY,mtime_ns INTEGER NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL); CREATE TABLE IF NOT EXISTS deps("from" TEXT NOT NULL,"to" TEXT NOT NULL,line INTEGER NOT NULL,path TEXT NOT NULL); CREATE INDEX IF NOT EXISTS deps_from ON deps("from"); CREATE INDEX IF NOT EXISTS deps_to ON deps("to"); CREATE TABLE IF NOT EXISTS aliases(alias TEXT NOT NULL,id TEXT NOT NULL,path TEXT NOT NULL); CREATE INDEX IF NOT EXISTS aliases_alias ON aliases(alias);`)
+	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS tasks(id TEXT NOT NULL,path TEXT PRIMARY KEY,"group" TEXT,rank TEXT,slug TEXT,title TEXT,status TEXT,type TEXT,priority TEXT,assignee TEXT,updated TEXT,payload TEXT NOT NULL,findings TEXT NOT NULL); CREATE INDEX IF NOT EXISTS tasks_id ON tasks(id); CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY,mtime_ns INTEGER NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL); CREATE TABLE IF NOT EXISTS deps("from" TEXT NOT NULL,"to" TEXT NOT NULL,line INTEGER NOT NULL,path TEXT NOT NULL); CREATE INDEX IF NOT EXISTS deps_from ON deps("from"); CREATE INDEX IF NOT EXISTS deps_to ON deps("to"); CREATE INDEX IF NOT EXISTS deps_path ON deps(path); CREATE TABLE IF NOT EXISTS aliases(alias TEXT NOT NULL,id TEXT NOT NULL,path TEXT NOT NULL); CREATE INDEX IF NOT EXISTS aliases_alias ON aliases(alias); CREATE INDEX IF NOT EXISTS aliases_path ON aliases(path);`)
 	if e != nil {
 		return fail(e)
 	}
@@ -142,7 +148,7 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 			}
 		}
 	}
-	disk := map[string]Marker{}
+	disk := make(map[string]Marker, len(c.files))
 	err := filepath.WalkDir(c.Root, func(path string, d fs.DirEntry, e error) error {
 		if e != nil {
 			return e
@@ -163,10 +169,7 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 		if e != nil {
 			return e
 		}
-		rel, e := filepath.Rel(c.Root, path)
-		if e != nil {
-			return e
-		}
+		rel := strings.TrimPrefix(path, c.Root+string(filepath.Separator))
 		rel = filepath.ToSlash(rel)
 		stats.Statted++
 		disk[rel] = Marker{Path: rel, MtimeNS: st.ModTime().UnixNano(), Size: st.Size()}
@@ -174,6 +177,19 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 	})
 	if err != nil {
 		return stats, err
+	}
+	if !c.rebuild && len(disk) == len(c.files) && len(forced) == 0 {
+		same := true
+		for p, m := range disk {
+			r, ok := c.files[p]
+			if !ok || r.MtimeNS != m.MtimeNS || r.Size != m.Size {
+				same = false
+				break
+			}
+		}
+		if same && head == c.head {
+			return stats, nil
+		}
 	}
 	// Hash only changed markers (or paths named by HEAD diff). Deleted hashes
 	// identify plain filesystem renames without parsing their unchanged contents.
@@ -227,6 +243,7 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 				}
 				prior.Task.Rank = r
 				prior.Task.Slug = slug
+				prior.Findings = append([]task.Finding(nil), prior.Findings...)
 				for n := range prior.Findings {
 					prior.Findings[n].Path = path
 				}
@@ -344,6 +361,7 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 		return stats, e
 	}
 	c.files = next
+	c.ordered = nil
 	c.head = head
 	c.rebuild = false
 	return stats, nil
@@ -359,17 +377,23 @@ func (c *Cache) List(ctx context.Context) ([]task.Task, error) {
 	return c.snapshot(), nil
 }
 func (c *Cache) snapshot() []task.Task {
-	out := make([]task.Task, 0, len(c.files))
-	for _, r := range c.files {
-		t := r.Task
+	if c.ordered == nil {
+		c.ordered = make([]task.Task, 0, len(c.files))
+		for _, r := range c.files {
+			c.ordered = append(c.ordered, r.Task)
+		}
+		task.Sort(c.ordered)
+	}
+	out := make([]task.Task, len(c.ordered))
+	for i, original := range c.ordered {
+		t := original
 		t.Assignee = append([]string(nil), t.Assignee...)
 		t.Labels = append([]string(nil), t.Labels...)
 		t.Aliases = append([]string(nil), t.Aliases...)
 		t.Dependencies = append([]task.Dependency(nil), t.Dependencies...)
 		t.Acceptance = append([]task.Acceptance(nil), t.Acceptance...)
-		out = append(out, t)
+		out[i] = t
 	}
-	task.Sort(out)
 	return out
 }
 func (c *Cache) Lint(ctx context.Context) ([]task.Finding, error) {

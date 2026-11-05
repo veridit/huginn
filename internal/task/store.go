@@ -1,6 +1,7 @@
 package task
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/veridit/huginn/internal/id"
 	"github.com/veridit/huginn/internal/rank"
@@ -11,10 +12,10 @@ import (
 )
 
 type Result struct {
-	Task     Task
-	Changed  bool
-	Next     string
-	Warnings []string
+	Task     Task     `json:"task"`
+	Changed  bool     `json:"changed"`
+	Next     string   `json:"next"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 type NewOptions struct {
 	Title, Goal, Group, Type, Priority string
@@ -54,7 +55,7 @@ func (s *Store) Tasks() ([]Task, error) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".md") {
+		if !strings.HasSuffix(path, ".md") || d.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
 		b, e := os.ReadFile(path)
@@ -80,7 +81,11 @@ func (s *Store) load(ref string) (*Document, []Task, error) {
 	if e != nil {
 		return nil, nil, e
 	}
-	b, e := os.ReadFile(filepath.Join(s.Root, t.Path))
+	path, e := s.diskPath(t.Path)
+	if e != nil {
+		return nil, nil, e
+	}
+	b, e := os.ReadFile(path)
 	if e != nil {
 		return nil, nil, e
 	}
@@ -103,7 +108,11 @@ func hint(t Task) string {
 }
 func (s *Store) finish(d *Document, changed bool) (Result, error) {
 	if changed {
-		if e := AtomicWrite(filepath.Join(s.Root, d.Task.Path), d.Bytes()); e != nil {
+		path, e := s.diskPath(d.Task.Path)
+		if e != nil {
+			return Result{}, e
+		}
+		if e := AtomicWrite(path, d.Bytes()); e != nil {
 			return Result{}, e
 		}
 		if s.Refresh != nil {
@@ -164,7 +173,7 @@ func (s *Store) New(o NewOptions) (Result, error) {
 	}
 	slug := Slug(o.Title)
 	path := filepath.ToSlash(filepath.Join(o.Group, BuildName(r, i, slug)))
-	q := func(s string) string { return fmt.Sprintf("%q", s) }
+	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	today := time.Now().Format("2006-01-02")
 	body := "---\nid: " + i + "\ntitle: " + q(o.Title) + "\nstatus: todo\ntype: " + o.Type + "\npriority: " + q(o.Priority) + "\nassignee: []\nlabels: "
 	labels := []string{}
@@ -248,11 +257,21 @@ func (s *Store) Transition(ref, status, user string) (Result, error) {
 	if status == "doing" && user != "" && len(d.Task.Assignee) > 0 && !contains(d.Task.Assignee, user) {
 		return Result{}, &Error{Kind: "taken", ID: d.Task.ID, Value: strings.Join(d.Task.Assignee, ", "), Fix: "huginn next"}
 	}
+	policy := s.DepsMode
+	if policy == "" {
+		policy, e = DepsPolicy(s.Root)
+		if e != nil {
+			return Result{}, e
+		}
+	}
+	if !contains([]string{"block", "warn"}, policy) {
+		return Result{}, Invalid("deps", policy, []string{"block", "warn"})
+	}
 	var warnings []string
 	if status == "doing" || status == "done" {
 		blocked := Blocked(d.Task, ts)
 		if len(blocked) > 0 {
-			if s.DepsMode != "warn" {
+			if policy != "warn" {
 				return Result{}, &Error{Kind: "blocked", ID: d.Task.ID, Dependencies: blocked, Fix: "huginn show " + blocked[0].ID}
 			}
 			warnings = append(warnings, "open dependencies")
@@ -362,7 +381,14 @@ func (s *Store) rename(d *Document, group, r, slug string) (Result, error) {
 	if path == d.Task.Path {
 		return s.finish(d, false)
 	}
-	dest := filepath.Join(s.Root, path)
+	dest, e := s.diskPath(path)
+	if e != nil {
+		return Result{}, e
+	}
+	source, e := s.diskPath(d.Task.Path)
+	if e != nil {
+		return Result{}, e
+	}
 	if _, e := os.Lstat(dest); e == nil {
 		return Result{}, &Error{Kind: "path-exists", ID: d.Task.ID, Value: path, Fix: "huginn lint"}
 	} else if !os.IsNotExist(e) {
@@ -371,11 +397,14 @@ func (s *Store) rename(d *Document, group, r, slug string) (Result, error) {
 	if e := os.MkdirAll(filepath.Dir(dest), 0755); e != nil {
 		return Result{}, e
 	}
-	if e := os.Rename(filepath.Join(s.Root, d.Task.Path), dest); e != nil {
+	if e := os.Rename(source, dest); e != nil {
 		return Result{}, e
 	}
 	d.Task.Path = path
-	d.Task.Group = group
+	d.Task.Group = filepath.ToSlash(filepath.Dir(path))
+	if d.Task.Group == "." {
+		d.Task.Group = ""
+	}
 	d.Task.Rank = r
 	d.Task.Slug = slug
 	if s.Refresh != nil {
