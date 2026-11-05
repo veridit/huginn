@@ -51,6 +51,40 @@ class Scorers(unittest.TestCase):
                     mutations += 1
         self.assertGreater(mutations, 40)
 
+    def test_d22_goal_only_normalizes_outer_whitespace_and_one_period(self):
+        scenario = next(s for s in SCENARIOS if s['id'] == 'create-bug')
+        for goal in ('Allow valid email addresses to sign in', '  Allow valid email addresses to sign in.\n', 'Allow valid email addresses to sign in. '):
+            observed = state(scenario)
+            observed['tasks'][0]['goal'] = goal
+            self.assertTrue(eval.score(scenario, observed)['pass'], goal)
+        for goal in ('Allow INVALID email addresses to sign in.', 'Allow valid email addresses to sign in!', 'Allow valid email addresses to sign in..', '', None, 1):
+            observed = state(scenario)
+            observed['tasks'][0]['goal'] = goal
+            self.assertFalse(eval.score(scenario, observed)['pass'], goal)
+
+    def test_d22_finish_accepts_only_unassigned_or_captured_actor(self):
+        scenario = next(s for s in SCENARIOS if s['id'] == 'finish-by-slug')
+        for assignee in ([], ['Acting User']):
+            observed = state(scenario)
+            observed['acting_user'] = 'Acting User'
+            observed['tasks'][0]['assignee'] = assignee
+            self.assertTrue(eval.score(scenario, observed)['pass'], assignee)
+        for assignee in (['Other User'], ['Acting User', 'Other User'], [''], None):
+            observed = state(scenario)
+            observed['acting_user'] = 'Acting User'
+            observed['tasks'][0]['assignee'] = assignee
+            self.assertFalse(eval.score(scenario, observed)['pass'], assignee)
+        observed = state(scenario)
+        observed.pop('acting_user')
+        observed['tasks'][0]['assignee'] = ['Acting User']
+        self.assertFalse(eval.score(scenario, observed)['pass'])
+
+    def test_d22_does_not_relax_assignee_in_other_scenarios(self):
+        scenario = next(s for s in SCENARIOS if s['id'] == 'move-group')
+        observed = state(scenario)
+        observed['tasks'][0]['assignee'] = ['Huginn Eval']
+        self.assertFalse(eval.score(scenario, observed)['pass'])
+
     def test_lint_findings_fail_every_scenario(self):
         for s in SCENARIOS:
             broken = state(s)

@@ -90,6 +90,14 @@ def score(scenario, state):
         for key, value in wanted.items():
             if key == 'assigned':
                 ok = 'assignee' in got and bool(got['assignee']) == value
+            elif key == 'goal':
+                # D22: sentence-ending punctuation is not task correctness.
+                normalize = lambda text: text.strip().removesuffix('.').rstrip() if isinstance(text, str) else None
+                ok = normalize(got.get(key)) == normalize(value)
+            elif key == 'assignee' and scenario['id'] == 'finish-by-slug':
+                # Taking before finishing is legitimate, but another owner is not.
+                actor = state.get('acting_user')
+                ok = got.get(key) == [] or (isinstance(actor, str) and bool(actor) and got.get(key) == [actor])
             elif key == 'notes_contain':
                 ok = all(x.casefold() in got.get('notes', '').casefold() for x in value)
             elif key == 'depends_on_titles':
@@ -270,7 +278,7 @@ def commands_from_session(session_id, env):
     return telemetry['commands'], telemetry['session_trace_available']
 
 
-def observe(binary, repo, before):
+def observe(binary, repo, before, acting_user=None):
     def query(*args):
         return json.loads(run([binary, *args, '--json'], repo).stdout)
     listing = query('ls')
@@ -286,7 +294,7 @@ def observe(binary, repo, before):
         raise RuntimeError('lint failed without findings')
     local = git(repo / '.huginn', 'rev-parse', 'HEAD')
     remote = git(repo, 'ls-remote', 'origin', 'refs/heads/huginn').split()
-    return dict(tasks=tasks, lint=findings, content_before=before,
+    return dict(tasks=tasks, lint=findings, content_before=before, acting_user=acting_user,
                 content_after=hashes(repo / '.huginn'),
                 remote_matches=bool(remote) and remote[0] == local,
                 worktree_clean=not git(repo / '.huginn', 'status', '--porcelain'))
@@ -321,6 +329,8 @@ def job(scenario, model, repeat, tier, args, root):
         git(folder, 'init', '--bare', str(folder / 'remote.git'))
         git(repo, 'init', '-b', 'main')
         git(repo, 'config', 'user.name', 'Huginn Eval')
+        # Capture identity before the model runs, never infer it from final state.
+        acting_user = env.get('HUGINN_USER', '').strip() or 'Huginn Eval'
         git(repo, 'config', 'user.email', 'eval@example.invalid')
         git(repo, 'config', 'commit.gpgsign', 'false')
         git(repo, 'config', 'core.hooksPath', '/dev/null')
@@ -335,7 +345,7 @@ def job(scenario, model, repeat, tier, args, root):
         git(repo / '.huginn', 'push', '-u', 'origin', 'huginn')
         before = hashes(repo / '.huginn')
         # Check seed schema through the actual binary before letting a model run.
-        initial = observe(args.binary, repo, before)
+        initial = observe(args.binary, repo, before, acting_user)
         if initial['lint']:
             raise RuntimeError('Seed tasks fail lint: ' + json.dumps(initial['lint']))
         bindir = folder / 'bin'
@@ -366,7 +376,7 @@ def job(scenario, model, repeat, tier, args, root):
         result['called_help'] = (any(any(a in ('help', '--help', '-h') for a in c['args']) or not c['args'] for c in calls)
                                  if tier == 'cli' else None)
         result['invented_commands'] = [c for c in calls if c.get('unknown_command')] if tier == 'cli' else None
-        state = observe(args.binary, repo, before)
+        state = observe(args.binary, repo, before, acting_user)
         dump(folder / 'state.json', state)
         result.update(score(scenario, state))
         # Transport failures do not turn an untouched blocked scenario into a pass.
@@ -471,6 +481,7 @@ def fixture_state(fixture):
     state = dict(fixture)
     state['tasks'] = [dict(seed_task(t), **t) for t in fixture['tasks']]
     state.setdefault('lint', [])
+    state.setdefault('acting_user', 'Huginn Eval')
     return state
 
 

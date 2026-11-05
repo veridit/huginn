@@ -99,6 +99,22 @@ The protocol-only `mcp-probe.py` fixture proves jcode discovery and isolation
 without a huginn binary. It is explicitly not a task server or a fake eval pass.
 The literal CLI wording in the MCP prompt is awaiting coordinator clarification.
 
+## D22 scorer corrections (2026-11-05)
+
+The goal comparator trims surrounding whitespace and one trailing full stop on
+both sides. Wording, case, internal whitespace, other punctuation and missing
+values remain significant. The user prompt's sentence punctuation is not a
+requirement to insert that punctuation into a goal.
+
+Only `finish-by-slug` accepts either an empty assignee array or exactly the
+acting user's name, because taking before completing is legitimate. The runner
+captures that identity before invoking the model (`HUGINN_USER`, otherwise the
+throwaway clone's configured `Huginn Eval`) and stores it as `acting_user` in
+state evidence. Other owners, multiple owners and absent identity evidence are
+rejected. Assignee preservation in every other scenario is unchanged. These
+corrections do not alter task inventories, dependencies, acceptance, status,
+rank/group/content preservation, lint, remote equality or cleanliness checks.
+
 ## Results and instrumentation
 
 * `$JCODE_SCRATCH_DIR/huginn/eval/results.json`: incremental results, errors,
