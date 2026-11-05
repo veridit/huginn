@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -266,6 +267,146 @@ func TestMetadataDoesNotClobberUnknownFields(t *testing.T) {
 	}
 }
 
+// withoutOrigin reconstructs the pre-D21 representation exactly: origin is
+// the only new generated span. Apply it to both task and durable baseline.
+func withoutOrigin(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	parts, err := units(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	for _, part := range parts {
+		if part.key != "field:origin" {
+			out.WriteString(part.raw)
+		}
+	}
+	return []byte(out.String())
+}
+func makeLegacy(t *testing.T, dst *task.Store) {
+	t.Helper()
+	items, err := dst.Tasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		path := filepath.Join(dst.Root, item.Path)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, path, withoutOrigin(t, raw))
+		state := filepath.Join(dst.Root, ".backlog-import", item.ID+".json")
+		raw, err = os.ReadFile(state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var base []byte
+		if err = json.Unmarshal(raw, &base); err != nil {
+			t.Fatal(err)
+		}
+		raw, err = json.Marshal(withoutOrigin(t, base))
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, state, raw)
+	}
+}
+func TestOriginLegacyBackfill(t *testing.T) {
+	src, dst := setup(t)
+	run(t, src, dst, Options{})
+	makeLegacy(t, dst)
+	before := hashes(t, dst.Root)
+	r := run(t, src, dst, Options{DryRun: true})
+	if r.Updated != 2 || !reflect.DeepEqual(before, hashes(t, dst.Root)) {
+		t.Fatal("backfill dry run", r)
+	}
+	r = run(t, src, dst, Options{})
+	if r.Added != 0 || r.Updated != 2 {
+		t.Fatal("backfill", r)
+	}
+	before = hashes(t, dst.Root)
+	r = run(t, src, dst, Options{})
+	if r.Updated != 0 || r.Unchanged != 2 || !reflect.DeepEqual(before, hashes(t, dst.Root)) {
+		t.Fatal("backfill unstable", r)
+	}
+}
+func TestOriginFirstAndLocalRelink(t *testing.T) {
+	src, dst := setup(t)
+	run(t, src, dst, Options{})
+	one, err := dst.Get("DEMO-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := dst.Get("DEMO-002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Swap the explicit links, leaving aliases and baselines unchanged. Origins
+	// must win, and imported units must not reset these human edits.
+	if err = one.SetField("origin", "backlog:DEMO-002"); err != nil {
+		t.Fatal(err)
+	}
+	if err = two.SetField("origin", "backlog:DEMO-001"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dst.Root, one.Task.Path), one.Bytes())
+	write(t, filepath.Join(dst.Root, two.Task.Path), two.Bytes())
+	r := run(t, src, dst, Options{})
+	if r.Added != 0 {
+		t.Fatal("ignored explicit relink", r)
+	}
+	for _, f := range r.Files {
+		if strings.HasSuffix(f.Source, "one.md") && f.ID != two.Task.ID {
+			t.Fatal("origin did not win over alias", f)
+		}
+		if strings.HasSuffix(f.Source, "two.md") && f.ID != one.Task.ID {
+			t.Fatal("origin did not win over baseline", f)
+		}
+	}
+	d, err := dst.Get(one.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, _, err := front(d.Bytes())
+	if err != nil || str(fields["origin"]) != "backlog:DEMO-002" {
+		t.Fatal("local origin edit clobbered", fields, err)
+	}
+	before := hashes(t, dst.Root)
+	r = run(t, src, dst, Options{})
+	if r.Unchanged != 2 || !reflect.DeepEqual(before, hashes(t, dst.Root)) {
+		t.Fatal("relink unstable", r)
+	}
+}
+func TestDuplicateOrigins(t *testing.T) {
+	src, dst := setup(t)
+	run(t, src, dst, Options{})
+	d, err := dst.Get("DEMO-002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.SetField("origin", "backlog:DEMO-001"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dst.Root, d.Task.Path), d.Bytes())
+	before := hashes(t, dst.Root)
+	r, err := Run(context.Background(), src, dst, Options{})
+	if err == nil || !strings.Contains(err.Error(), "duplicate destination origin") {
+		t.Fatal("duplicate accepted", err)
+	}
+	n := 0
+	for _, f := range r.Files {
+		for _, finding := range f.Findings {
+			if finding.Problem == "duplicate origin backlog:DEMO-001" {
+				n++
+			}
+		}
+	}
+	if n != 2 || !reflect.DeepEqual(before, hashes(t, dst.Root)) {
+		t.Fatal("missing findings or mutated ambiguous destination", r)
+	}
+}
+
 // Real task content is only read into a test-time copy outside the repository.
 func TestRealStatbus(t *testing.T) {
 	home, e := os.UserHomeDir()
@@ -324,6 +465,10 @@ func TestRealStatbus(t *testing.T) {
 			t.Fatal(e)
 		}
 		docs = append(docs, d)
+		fields, _, e := front(d.Bytes())
+		if e != nil || str(fields["origin"]) != "backlog:"+tt.Aliases[0] {
+			t.Fatalf("missing origin for %s: %v", tt.ID, e)
+		}
 		for _, a := range tt.Aliases {
 			resolved, e := task.Resolve(tasks, a)
 			if e != nil || resolved.ID != tt.ID {
@@ -396,6 +541,17 @@ func TestRealStatbus(t *testing.T) {
 	}
 	t.Logf("%d imported; every alias resolves; every dependency resolves or is reported; ordinal order preserved", len(want))
 	t.Logf("second run: added 0 updated 0 unchanged %d; all destination SHA-256 hashes byte-identical", len(want))
+	makeLegacy(t, dst)
+	r = run(t, src, dst, Options{})
+	if r.Added != 0 || r.Updated != len(want) || r.Unchanged != 0 {
+		t.Fatal("legacy real backfill", r)
+	}
+	before = hashes(t, dst.Root)
+	r = run(t, src, dst, Options{})
+	if r.Added != 0 || r.Updated != 0 || r.Unchanged != len(want) || !reflect.DeepEqual(before, hashes(t, dst.Root)) {
+		t.Fatal("legacy real backfill not stable", r)
+	}
+	t.Logf("D21: origin set on all %d fresh tasks; legacy backfill updated %d once; next run unchanged %d byte-identical", len(want), len(want), len(want))
 }
 func FuzzParsing(f *testing.F) {
 	f.Add([]byte(fixture))

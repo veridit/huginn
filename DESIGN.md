@@ -193,6 +193,7 @@ priority: high          # optional
 assignee: []            # names; `take` sets it
 labels: [recall, bug]
 aliases: [STATBUS-093]  # optional
+origin: backlog:STATBUS-093  # optional, set by import
 created: 2026-11-05
 updated: 2026-11-05
 ---
@@ -328,6 +329,13 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
   names that differ only by case. Human-typed uppercase ranks still read.
 - **D20 (foreman 23:32)** the TUI takes an optional `Take` hook from the CLI
   so `t` goes through the same push-lock as `huginn take`.
+- **D21 (user via foreman 23:37) import provenance is separate from aliases.**
+  `origin: <system>:<source-id>` (for example `backlog:STATBUS-093`) matches
+  muninn's origin shape. Re-import matches origin first, then legacy aliases
+  and baselines, back-filling origin once. Old ids remain human aliases, while
+  Huginn ids stay independent. A local origin edit re-links the task and is
+  respected. Duplicate origins are lint findings (importer preflight until
+  core lint adopts the field).
 
 ## Build plan (approved 22:36, lanes started)
 

@@ -17,7 +17,13 @@ is checked between files. A partially completed import can safely be retried.
   `backlog:<SOURCE-ID>:<attempt>` supplies 30 bits encoded as six lowercase
   Crockford characters. Occupied ids are checked, and collisions retry the next
   attempt. Allocation is ordered by source ordinal, then source id. Existing
-  aliases and persisted import baselines take precedence over generated ids.
+  origins take precedence, then legacy aliases and persisted import baselines,
+  then generated ids. `origin: backlog:SOURCE-ID` is explicit provenance,
+  separate from human aliases. Pre-D21 imports back-fill it once, counted as an
+  update, then rerun byte-identically. Source ids are canonically uppercase.
+  A local nonempty origin edit is authoritative and re-links the task, so that
+  task no longer participates in old alias/baseline fallback. Swapping two
+  origins safely swaps their upstream links without changing Huginn ids.
 * Source id becomes the first alias, followed by any pre-existing source aliases.
   The canonical id is both in the
   filename and the frontmatter. A title-derived six-word slug is generated only
@@ -59,6 +65,10 @@ Huginn root. These are durable import baselines and should be committed on the
 Huginn branch with tasks. They contain imported content, never put them on the
 application source branch. They are not the disposable SQLite cache.
 
+`LintOrigins(docs)` exposes duplicate-origin findings for every conflicting
+document. Run checks these before any writes and refuses ambiguous provenance.
+This supplements core lint until it projects and validates origin itself.
+
 Each frontmatter field and each level-two section is a merge unit. If the local
 unit still equals the previous upstream unit, an upstream edit replaces it. If
 local differs, local wins even when upstream changed that same unit. Thus local
@@ -66,7 +76,8 @@ checkbox/note/goal edits protect the entire corresponding section. Local
 removal of a field or section is also retained. New upstream fields/sections
 are appended safely, with fields inside the YAML block. Source deletion never
 deletes a destination task. Existing aliases without baselines are adopted
-conservatively without changing task contents. Invalid local frontmatter is
+conservatively without changing task contents except missing provenance.
+Invalid local frontmatter is
 left untouched. Missing or corrupt metadata is never used to overwrite local
 content. Deleting a local alias alone does not create a duplicate task because
 baselines retain the import identity.

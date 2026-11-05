@@ -99,6 +99,51 @@ func list(v any) []string {
 	return out
 }
 func canonical(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
+func originKey(s string) string {
+	s = strings.TrimSpace(s)
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) != 2 {
+		return s
+	}
+	return strings.ToLower(parts[0]) + ":" + canonical(parts[1])
+}
+
+// LintOrigins reports every destination document sharing an explicit origin.
+// It supplements core lint until origin becomes part of the core task schema.
+func LintOrigins(docs []*task.Document) []task.Finding {
+	byOrigin := map[string][]task.Finding{}
+	for _, doc := range docs {
+		fields, _, err := front(doc.Bytes())
+		if err != nil {
+			continue
+		}
+		origin := originKey(str(fields["origin"]))
+		if origin == "" {
+			continue
+		}
+		line := 1
+		for i, text := range strings.Split(string(doc.Bytes()), "\n") {
+			if strings.HasPrefix(text, "origin:") {
+				line = i + 1
+				break
+			}
+		}
+		byOrigin[origin] = append(byOrigin[origin], task.Finding{Path: doc.Task.Path, Line: line, Problem: "duplicate origin " + origin})
+	}
+	findings := []task.Finding{}
+	for _, group := range byOrigin {
+		if len(group) > 1 {
+			findings = append(findings, group...)
+		}
+	}
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].Path != findings[j].Path {
+			return findings[i].Path < findings[j].Path
+		}
+		return findings[i].Line < findings[j].Line
+	})
+	return findings
+}
 func stableID(alias string, attempt int) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("backlog:%s:%d", canonical(alias), attempt)))
 	n := binary.BigEndian.Uint32(sum[:4]) & 0x3fffffff
@@ -214,6 +259,9 @@ func Run(ctx context.Context, src string, dst *task.Store, opts Options) (Report
 	ids := map[string]string{}
 	occupied := map[string]bool{}
 	byID := map[string]task.Task{}
+	hasOrigin := map[string]bool{}
+	origins := map[string]string{}
+	var originDocs []*task.Document
 	for _, t := range existing {
 		if !id.Valid(t.ID) {
 			return report, fmt.Errorf("invalid destination id %q: run huginn lint", t.ID)
@@ -223,8 +271,53 @@ func Run(ctx context.Context, src string, dst *task.Store, opts Options) (Report
 		}
 		occupied[t.ID] = true
 		byID[t.ID] = t
+		path := t.Path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(dst.Root, path)
+		}
+		if rel, e := filepath.Rel(dst.Root, path); e != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return report, fmt.Errorf("destination task path escapes root: %s", path)
+		}
+		raw, e := os.ReadFile(path)
+		if e != nil {
+			return report, e
+		}
+		originDocs = append(originDocs, task.Parse(path, raw))
+		fields, _, e := front(raw)
+		if e == nil {
+			origin := originKey(str(fields["origin"]))
+			if origin != "" {
+				hasOrigin[t.ID] = true
+				origins[origin] = t.ID
+			}
+		}
+	}
+	if findings := LintOrigins(originDocs); len(findings) != 0 {
+		for _, f := range findings {
+			report.Files = append(report.Files, FileReport{Path: f.Path, Action: "conflict", Findings: []task.Finding{f}})
+		}
+		return report, fmt.Errorf("duplicate destination origin: resolve the reported provenance conflicts")
+	}
+	for _, s := range sources {
+		if existingID := origins["backlog:"+s.alias]; existingID != "" {
+			ids[s.alias] = existingID
+		}
+	}
+	primary := map[string]bool{}
+	for alias := range ids {
+		primary[alias] = true
+	}
+	for _, t := range existing {
+		// An explicit origin is authoritative, including a human re-link to a
+		// different source. Its aliases must never reattach the old source.
+		if hasOrigin[t.ID] {
+			continue
+		}
 		for _, a := range t.Aliases {
 			a = canonical(a)
+			if primary[a] {
+				continue
+			}
 			if old := ids[a]; old != "" && old != t.ID {
 				return report, fmt.Errorf("ambiguous destination alias %s", a)
 			}
@@ -253,8 +346,14 @@ func Run(ctx context.Context, src string, dst *task.Store, opts Options) (Report
 		if _, exists := byID[t.ID]; !exists {
 			continue
 		}
+		if hasOrigin[t.ID] {
+			continue
+		}
 		for _, alias := range t.Aliases {
 			a := canonical(alias)
+			if primary[a] {
+				continue
+			}
 			if old := ids[a]; old != "" && old != t.ID {
 				return report, fmt.Errorf("ambiguous import baseline alias %s", a)
 			}
@@ -334,7 +433,14 @@ func Run(ctx context.Context, src string, dst *task.Store, opts Options) (Report
 			}
 			if os.IsNotExist(e) {
 				result = local
-				fr.Findings = append(fr.Findings, task.Finding{Path: path, Line: 1, Problem: "existing alias has no import baseline: kept destination unchanged"})
+				if !hasOrigin[id] {
+					doc := task.Parse(path, local)
+					if e = doc.SetField("origin", "backlog:"+s.alias); e != nil {
+						return report, e
+					}
+					result = doc.Bytes()
+				}
+				fr.Findings = append(fr.Findings, task.Finding{Path: path, Line: 1, Problem: "existing alias has no import baseline: kept destination content, back-filled missing origin"})
 			} else {
 				var base []byte
 				if e = json.Unmarshal(baseline, &base); e != nil {
@@ -481,7 +587,7 @@ func convert(s source, id string, ids map[string]string) ([]byte, error) {
 	updates := []struct {
 		k string
 		v any
-	}{{"id", id}, {"aliases", aliases}, {"status", status}, {"type", typ}, {metadataKey("import_type_inference"), reason}}
+	}{{"id", id}, {"origin", "backlog:" + s.alias}, {"aliases", aliases}, {"status", status}, {"type", typ}, {metadataKey("import_type_inference"), reason}}
 	if value, ok := s.fields["type"]; ok {
 		updates = append(updates, struct {
 			k string
