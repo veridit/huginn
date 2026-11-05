@@ -45,6 +45,20 @@ Status: DRAFT for discussion. Open questions are marked **Q**.
 - **Q** memories: should `muninn sync` move `.muninn/memories.jsonl` onto the
   same branch (a `memories/` dir), so main stays clean too?
 
+### Verified in a throwaway repo (git 2.54.0, 2026-11-05)
+
+- `git worktree add --orphan -b huginn .huginn` plus `.huginn/` in
+  `.git/info/exclude`: main `git status` stays empty, 0 files tracked on main.
+- A second clone runs `git fetch origin huginn && git worktree add .huginn
+  huginn` and sees the same tasks.
+- Two people adding different task files: `pull --rebase` merges cleanly
+  (3 commits, all 3 files present).
+- `take` race: Alice and Bob both set the assignee of `k7m2qx` from the same
+  base. Alice's push succeeds; Bob's is rejected (`! [rejected] ... (fetch
+  first)`) and his rebase conflicts on that file. So `take` must: pull, check
+  the assignee, write, commit, push; on rejection reset to the remote and
+  report "taken by alice". Push is a real lock.
+
 ## Identity
 
 - id: 6 chars of Crockford base32 (lowercase, no i/l/o/u), random. Example
