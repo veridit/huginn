@@ -292,6 +292,15 @@ def observe(binary, repo, before):
                 worktree_clean=not git(repo / '.huginn', 'status', '--porcelain'))
 
 
+def model_command(model, tier, repo, prompt):
+    cmd = ['jcode', 'run', '-m', model, '--quiet', '--json']
+    # An empty allow-list also hides MCP in jcode. Explicit mcp admits only the
+    # unified MCP dispatcher and configured MCP tools, never bash/read/write.
+    cmd += (['--tools', 'bash'] if tier == 'cli' else
+            ['--disable-base-tools', '--tools', 'mcp', '--mcp-tools', 'eager'])
+    return cmd + ['-C', str(repo), prompt + '\n\nUse the huginn CLI.']
+
+
 def job(scenario, model, repeat, tier, args, root):
     folder = Path(tempfile.mkdtemp(prefix=f'{tier}-{scenario["id"]}-{model}-{repeat}-', dir=root))
     repo = folder / 'repo'
@@ -337,9 +346,7 @@ def job(scenario, model, repeat, tier, args, root):
         # Config is outside task branch, excluded so no accidental main changes matter.
         with (repo / '.git/info/exclude').open('a') as f:
             f.write('\n.mcp.json\n')
-        cmd = ['jcode', 'run', '-m', model, '--quiet', '--json']
-        cmd += ['--tools', 'bash'] if tier == 'cli' else ['--disable-base-tools', '--tool-profile', 'none', '--mcp-tools', 'eager']
-        cmd += ['-C', str(repo), scenario['prompt'] + '\n\nUse the huginn CLI.']
+        cmd = model_command(model, tier, repo, scenario['prompt'])
         result['invocation'] = cmd
         model_start = time.monotonic()
         proc = run(cmd, repo, env, timeout=args.timeout, check=False)
@@ -373,7 +380,7 @@ def job(scenario, model, repeat, tier, args, root):
 
 def table(results, scenarios, models, runs, tiers):
     lines = ['# Huginn agent eval', '', f'Bar: every cell >= 2/{runs}. State only. Concurrency 4.', '']
-    passed = runs >= 3
+    passed = runs == 3
     for tier in tiers:
         lines += [f'## {tier}', '', '| Model | ' + ' | '.join(s['id'] for s in scenarios) + ' |',
                   '|---|' + '---|' * len(scenarios)]

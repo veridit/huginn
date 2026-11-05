@@ -129,6 +129,18 @@ for scenario in SCENARIOS:
 
 
 class Harness(unittest.TestCase):
+    def test_model_invocations_have_no_command_documentation(self):
+        for model in eval.MODELS:
+            for tier in ('cli', 'mcp'):
+                cmd = eval.model_command(model, tier, Path('/repo'), 'Take my next task.')
+                self.assertEqual(cmd[:7], ['jcode','run','-m',model,'--quiet','--json','--tools'] if tier == 'cli'
+                                 else ['jcode','run','-m',model,'--quiet','--json','--disable-base-tools'])
+                self.assertEqual(cmd[cmd.index('--tools')+1], 'bash' if tier == 'cli' else 'mcp')
+                self.assertEqual(cmd[-1], 'Take my next task.\n\nUse the huginn CLI.')
+                if tier == 'mcp':
+                    self.assertNotIn('bash', cmd)
+                    self.assertIn('--disable-base-tools', cmd)
+
     @unittest.skipUnless(shutil.which('jcode'), 'jcode not installed')
     def test_real_jcode_headless_project_mcp_discovery(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get('JCODE_SCRATCH_DIR')) as td:

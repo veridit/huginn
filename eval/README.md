@@ -86,7 +86,10 @@ only `huginn-eval: {command: /absolute/path/to/huginn, args: [mcp]}`.
 No global config is modified. The runner checks `jcode mcp list` after the
 local override and refuses to continue if any unwanted server is enabled.
 
-MCP calls use `--disable-base-tools --tool-profile none --mcp-tools eager`.
+MCP calls use `--disable-base-tools --tools mcp --mcp-tools eager`.
+The explicit MCP allow-list is necessary: an empty base-tool selection also hides
+MCP tools in jcode. It exposes the MCP dispatcher and configured server tools,
+not bash/read/write. This follows `tool/name_policy.rs::tool_name_is_allowed`.
 `JCODE_TOOLS` and `JCODE_DISABLED_TOOLS` are cleared in the child environment so
 an inherited allow-list cannot re-enable bash. A real `jcode mcp test
 huginn-eval` handshake runs before the tier starts. If headless discovery or the
