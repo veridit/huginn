@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,141 @@ func seedRank(t *testing.T, root, r, id string) {
 	path := BuildName(r, id, "task")
 	if e := os.WriteFile(filepath.Join(root, path), []byte(body), 0644); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestMoveCaseOnlyRankRename(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	seedRank(t, s.Root, "A", "000001")
+	seedRank(t, s.Root, "J", "000002")
+	before := hashes(t, s.Root)
+	r, err := s.Move("000001", MoveOptions{After: "000002"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Task.Rank != strings.ToLower(r.Task.Rank) {
+		t.Fatalf("D19 generated uppercase rank %q", r.Task.Rank)
+	}
+	assertReportedWindow(t, s, before, r)
+	entries, err := os.ReadDir(s.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range entries {
+		if entry.Name() == r.Task.Path {
+			found = true
+		}
+		if entry.Name() == BuildName("A", "000001", "task") {
+			t.Fatal("old spelling remains after case-only rename")
+		}
+	}
+	if !found {
+		t.Fatal("destination spelling missing", r.Task.Path)
+	}
+}
+
+func TestRenameDestinationRejectsOtherEntries(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	dest := filepath.Join(root, "other")
+	if err := os.WriteFile(source, []byte("original"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(source, dest); err != nil {
+		t.Fatal(err)
+	}
+	if available, err := renameDestinationAvailable(source, dest); err != nil || available {
+		t.Fatalf("hard link must not be overwritten: available=%v err=%v", available, err)
+	}
+	caseDest := filepath.Join(root, "SOURCE")
+	if _, err := os.Lstat(caseDest); os.IsNotExist(err) {
+		if err := os.Link(source, caseDest); err != nil {
+			t.Fatal(err)
+		}
+		if available, err := renameDestinationAvailable(source, caseDest); err != nil || available {
+			t.Fatalf("case-equivalent distinct hard link must not be overwritten: available=%v err=%v", available, err)
+		}
+	}
+}
+
+func TestDirectCaseOnlyRename(t *testing.T) {
+	s := &Store{Root: t.TempDir()}
+	seedRank(t, s.Root, "A", "000001")
+	d, err := s.Get("000001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := hashes(t, s.Root)
+	r, err := s.rename(d, "", "a", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertReportedWindow(t, s, before, r)
+	entries, err := os.ReadDir(s.Root)
+	if err != nil || len(entries) != 1 || entries[0].Name() != r.Task.Path {
+		t.Fatalf("case-only rename did not install exact destination spelling: %v %v", entries, err)
+	}
+}
+
+func TestRandomMovesCaseInsensitiveSimulation(t *testing.T) {
+	for _, seed := range []int64{7, 42, 2026} {
+		t.Run(fmt.Sprint(seed), func(t *testing.T) {
+			s := &Store{Root: t.TempDir()}
+			for n, key := range []string{"0", "A", "A", "A0", "J", "a", "z", ""} {
+				seedRank(t, s.Root, key, fmt.Sprintf("00000%d", n+1))
+			}
+			rng := rand.New(rand.NewSource(seed))
+			for n := 0; n < 500; n++ {
+				ts, err := s.Tasks()
+				if err != nil {
+					t.Fatal(err)
+				}
+				moved, neighbour := ts[rng.Intn(len(ts))], ts[rng.Intn(len(ts))]
+				o := MoveOptions{Top: true}
+				if n%3 == 1 {
+					o = MoveOptions{Before: neighbour.ID}
+				} else if n%3 == 2 {
+					o = MoveOptions{After: neighbour.ID}
+				}
+				before := hashes(t, s.Root)
+				r, err := s.Move(moved.ID, o)
+				if err != nil {
+					t.Fatalf("move %d: %v", n, err)
+				}
+				assertReportedWindow(t, s, before, r)
+				ts, err = s.Tasks()
+				if err != nil {
+					t.Fatal(err)
+				}
+				folded := map[string]bool{}
+				for _, task := range ts {
+					key := strings.ToLower(task.Path)
+					if folded[key] {
+						t.Fatalf("move %d: case-fold collision %s", n, task.Path)
+					}
+					folded[key] = true
+					if contains(r.Renamed, task.ID) && strings.Trim(task.Rank, "0123456789abcdefghijklmnopqrstuvwxyz") != "" {
+						t.Fatalf("generated non-base36 rank %q", task.Rank)
+					}
+				}
+			}
+			t.Log("500 random top/before/after moves: lowercase-fold filenames unique, generated ranks lowercase, hashes unchanged outside reported windows")
+		})
+	}
+}
+
+func TestLintCaseInsensitiveFilenameCollision(t *testing.T) {
+	a := Parse("A.000001.task.md", []byte(strings.Replace(sample, "k7m2qx", "000001", 1)))
+	b := Parse("a.000001.task.md", a.Bytes())
+	count := 0
+	for _, finding := range Lint([]*Document{a, b}) {
+		if strings.Contains(finding.Problem, "case-insensitive filename collision") {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("expected finding for each conflicting file, got %d", count)
 	}
 }
 func assertReportedWindow(t *testing.T, s *Store, before map[string][32]byte, result Result) {

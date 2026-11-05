@@ -394,15 +394,17 @@ func (s *Store) rename(d *Document, group, r, slug string) (Result, error) {
 	if e != nil {
 		return Result{}, e
 	}
-	if _, e := os.Lstat(dest); e == nil {
-		return Result{}, &Error{Kind: "path-exists", ID: d.Task.ID, Value: path, Fix: "huginn lint"}
-	} else if !os.IsNotExist(e) {
+	available, e := renameDestinationAvailable(source, dest)
+	if e != nil {
 		return Result{}, e
+	}
+	if !available {
+		return Result{}, &Error{Kind: "path-exists", ID: d.Task.ID, Value: path, Fix: "huginn lint"}
 	}
 	if e := os.MkdirAll(filepath.Dir(dest), 0755); e != nil {
 		return Result{}, e
 	}
-	if e := os.Rename(source, dest); e != nil {
+	if e := renameFile(source, dest); e != nil {
 		return Result{}, e
 	}
 	d.Task.Path = path

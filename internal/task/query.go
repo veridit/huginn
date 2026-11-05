@@ -198,13 +198,22 @@ func Lint(docs []*Document) []Finding {
 	var out []Finding
 	var tasks []Task
 	counts := map[string]int{}
+	paths := map[string][]string{}
 	for _, d := range docs {
 		counts[d.Task.ID]++
+		key := strings.ToLower(d.Task.Path)
+		paths[key] = append(paths[key], d.Task.Path)
+	}
+	for _, matches := range paths {
+		sort.Strings(matches)
 	}
 	for _, d := range docs {
 		out = append(out, d.Findings...)
 		t := d.Task
 		tasks = append(tasks, t)
+		if matches := paths[strings.ToLower(t.Path)]; len(matches) > 1 {
+			out = append(out, Finding{t.Path, 1, "case-insensitive filename collision: " + strings.Join(matches, ", ")})
+		}
 		if t.ID != "" && counts[t.ID] > 1 {
 			out = append(out, Finding{t.Path, 1, "duplicate id " + t.ID})
 		}

@@ -168,9 +168,16 @@ the cache in the same step.
 ## Ordering
 
 - Rank is the optional file name prefix: any string, compared bytewise.
-  huginn generates lexorank keys (base62) between neighbours, so a move
+  huginn generates lowercase base36 lexorank keys (`0-9a-z`) between neighbours,
+  so a move
   renames one file. Humans may use numbers; pad them (`100`, `150`).
 - Ties (seen in statbus) break by id, so order is total and stable.
+- **D19 (foreman 2026-11-05 23:31): generated ranks are lowercase base36.**
+  Existing human-typed uppercase ranks retain bytewise ordering. Automatic
+  repair rewrites touched ranks with lowercase keys, avoiding case-only name
+  changes on macOS, Windows and git with `core.ignorecase`. Defensive case-only
+  renames use a temporary name and verify source/destination identity. Lint
+  reports filenames that collide under case folding.
 - Rebalance only when a key grows past 12 chars, as one rename commit.
 - `priority:` kept as a label for filtering, not for order.
 

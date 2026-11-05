@@ -3,7 +3,6 @@ package task
 import (
 	"errors"
 	"github.com/veridit/huginn/internal/rank"
-	"os"
 	"path/filepath"
 )
 
@@ -101,10 +100,16 @@ func (s *Store) applyRanks(plan []rankChange, focus Task) (Result, error) {
 		if e != nil {
 			return Result{}, e
 		}
-		if _, e = os.Lstat(path); e == nil {
-			return Result{}, &Error{Kind: "path-exists", ID: p.Task.ID, Value: dest, Fix: "huginn lint"}
-		} else if !os.IsNotExist(e) {
+		source, e := s.diskPath(p.Task.Path)
+		if e != nil {
 			return Result{}, e
+		}
+		available, e := renameDestinationAvailable(source, path)
+		if e != nil {
+			return Result{}, e
+		}
+		if !available {
+			return Result{}, &Error{Kind: "path-exists", ID: p.Task.ID, Value: dest, Fix: "huginn lint"}
 		}
 	}
 	local := *s
