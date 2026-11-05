@@ -188,7 +188,9 @@ func Run(ctx context.Context, src string, dst *task.Store, opts Options) (Report
 		if value, ok := fields["ordinal"]; ok {
 			s.ordinal, e = strconv.ParseFloat(str(value), 64)
 			s.ranked = e == nil && !math.IsNaN(s.ordinal) && !math.IsInf(s.ordinal, 0)
-			if !s.ranked { s.ordinal = 0 }
+			if !s.ranked {
+				s.ordinal = 0
+			}
 		}
 		sources = append(sources, s)
 	}
