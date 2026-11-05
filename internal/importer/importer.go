@@ -56,6 +56,9 @@ func front(raw []byte) (map[string]any, int, error) {
 	offset := len(lines[0])
 	for i := 1; i < len(lines); i++ {
 		if strings.TrimSpace(lines[i]) == "---" {
+			if bytes.Contains(bytes.ReplaceAll(raw[:offset], []byte("\r\n"), nil), []byte("\r")) {
+				return nil, 0, fmt.Errorf("frontmatter contains unsupported bare carriage return")
+			}
 			var node yaml.Node
 			if err := yaml.Unmarshal(raw[len(lines[0]):offset], &node); err != nil {
 				return nil, 0, err
@@ -527,13 +530,22 @@ func units(raw []byte) ([]unit, error) {
 	start := len(lines[0])
 	out = append(out, unit{"open", string(raw[:start])})
 	for i := 0; i < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Line < 1 || mapping.Content[i].Line >= len(offsets) {
+			return nil, fmt.Errorf("invalid YAML field line")
+		}
 		a := offsets[mapping.Content[i].Line]
 		if i == 0 && a > start {
 			out = append(out, unit{"header", string(raw[start:a])})
 		}
 		b := last
 		if i+2 < len(mapping.Content) {
+			if mapping.Content[i+2].Line < 1 || mapping.Content[i+2].Line >= len(offsets) {
+				return nil, fmt.Errorf("invalid YAML field boundary")
+			}
 			b = offsets[mapping.Content[i+2].Line]
+		}
+		if a < start || a > b || b > last {
+			return nil, fmt.Errorf("unsupported overlapping YAML field spans")
 		}
 		out = append(out, unit{"field:" + mapping.Content[i].Value, string(raw[a:b])})
 	}
