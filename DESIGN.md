@@ -149,6 +149,14 @@ the cache in the same step.
     fixed by `huginn reid <file>`.
 - Never changes. It is in the file name and the frontmatter; title, slug,
   folder and rank are all free to change around it.
+- **Every task has two names (D10, user 15:50): the id for machines, the
+  slug for humans.** `new` derives the slug from the title (lowercase,
+  dashes, at most 6 words), and it stays put when the title is later edited
+  unless someone renames it. Everything huginn prints shows both, `k7m2qx
+  recall-gate-drops-hits`, in `ls`, `next`, `show`, lint messages and MCP
+  results, so people read the slug and agents copy the id. Lookup accepts
+  either: an id or unique id prefix, or a unique slug (an ambiguous slug
+  lists the matching ids and exits 2).
 - Short refs: any unique prefix works (`huginn show k7m`).
 - Imported ids (`STATBUS-093`) kept as `aliases:`, resolvable everywhere.
 
