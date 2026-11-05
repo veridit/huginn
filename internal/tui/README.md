@@ -2,8 +2,11 @@
 
 The CLI calls `tui.Run(ctx, store, tui.Options{User: user, Commit: commit})`.
 `Commit` runs after a successful changed mutation. Store refreshes expose external
-file edits. Git synchronization and identity resolution belong to the caller.
-The TUI does not claim a distributed take lock from a commit-only callback.
+file edits. The optional `Take func(ref string) (task.Result, error)` callback owns
+an entire distributed take transaction, including pull/check/write/commit/push.
+When supplied, `t` calls it and never calls `Commit` again. Errors such as
+"taken by alice" remain inline. Without it, `t` uses local Store.Take + Commit.
+Git synchronization and identity resolution belong to the caller.
 
 ## Keys
 

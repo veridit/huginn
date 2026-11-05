@@ -18,6 +18,8 @@ import (
 type Options struct {
 	User   string
 	Commit func(msg string) error
+	// Take optionally owns the complete distributed take transaction, including commit.
+	Take func(ref string) (task.Result, error)
 }
 
 func Run(ctx context.Context, store *task.Store, opts Options) error {
@@ -129,7 +131,7 @@ func (m *model) finish(r task.Result, err error, action string) {
 	if len(r.Warnings) > 0 {
 		m.message += "\n" + strings.Join(r.Warnings, "\n")
 	}
-	if r.Changed && m.opts.Commit != nil {
+	if r.Changed && m.opts.Commit != nil && !(action == "take" && m.opts.Take != nil) {
 		if e := m.opts.Commit("huginn: " + action + " " + r.Task.ID); e != nil {
 			m.message = e.Error()
 		}
@@ -256,7 +258,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh(t.Path)
 		case "t":
 			if ok {
-				r, e := m.store.Take(t.ID, m.opts.User)
+				var r task.Result
+				var e error
+				if m.opts.Take != nil {
+					r, e = m.opts.Take(t.ID)
+				} else {
+					r, e = m.store.Take(t.ID, m.opts.User)
+				}
 				m.finish(r, e, "take")
 			}
 		case "d":

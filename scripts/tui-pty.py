@@ -17,8 +17,6 @@ import termios
 import time
 
 REPO = Path(__file__).resolve().parents[1]
-if not (REPO / "go.mod").exists():
-    REPO = Path(__file__).resolve().parents[3]
 ARTIFACTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 if ARTIFACTS:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
