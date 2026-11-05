@@ -60,13 +60,69 @@ Status: DRAFT. Q1-Q5 decided by the user 2026-11-05 13:36 (see Decisions).
 - `huginn init` creates the branch (or fetches it), adds the worktree, and
   writes `.huginn/` into `.git/info/exclude`, so main never sees it and no
   `.gitignore` edit is needed.
-- Layout inside the worktree:
-  - `tasks/<id>.md`, one per task, done or not (status is a field, not a dir).
+- Layout inside the worktree (D7, user 15:48: folders are groups):
+  ```
+  huginn.toml
+  auth/                                         a group is a folder; nesting allowed
+    a0.k7m2qx.recall-gate-drops-hits.md
+    a1.p3rt9a.embedding-client-retries.md
+  recall/
+    a0V.m4xv2c.short-memory-ids.md
+  k9zz1a.release-checklist.md                   no rank prefix = unranked (last)
+  ```
+  - **File name = `[<rank>.]<id>.<slug>.md`** (D9, user 15:48). Dots
+    separate the parts because slugs contain dashes. **The id is the only
+    thing that links anything together.** It is also in the frontmatter
+    (`id:`), which wins if a file name gets mangled; `lint` flags a mismatch.
+  - The file system is the interface. Each of these is a plain rename that
+    keeps the id, so nothing breaks:
+    - group: move the file to another folder (`huginn mv <id> <group>` or
+      `git mv`, a file manager, an editor);
+    - priority: change the rank prefix (`huginn move <id> --before <id>`
+      writes a rank between the neighbours; a human can type `100.`, `150.`);
+    - slug: rename it to anything, or let `huginn` follow the title.
+  - Rank lives only in the file name, not in the frontmatter, so
+    reprioritising changes no file content: git records a pure rename and
+    two people reordering different tasks never conflict.
+  - Ranks compare as plain strings across all folders, so `next` and `ls`
+    give one global order; a group view is the same order, filtered.
+  - Done tasks stay where they are; status is a field, not a folder.
   - `huginn.toml` project config.
-  - `docs/`, `decisions/` optional, same id scheme.
 - `huginn sync`: commit local changes, `pull --rebase`, push. Only the huginn
   branch. Conflicts are per file and rare because each task is its own file.
-- Memories live on the same branch under `memories/` (D4).
+- Memories live on their own `muninn` branch (D6).
+
+## Local cache (D8, user 15:48-15:49)
+
+A small SQLite file mirrors the disk state so structure questions are
+instant: what depends on this, what is blocked, `next`, `ls`, a group view.
+The markdown tree is the only truth. **Delete the cache and the next command
+rebuilds it from disk**; nothing is ever lost with it.
+
+Every command first syncs the cache with disk, then answers from it.
+Commands that change things (`move`, `mv`, `take`, `done`, retitle) work out
+the right file edit or rename from the cache, apply it to disk, and update
+the cache in the same step.
+
+- Location: `.git/huginn/cache.db` (per clone, never committed, outside the
+  worktree so the branch never sees it).
+- Tables: `tasks` (id, path, group, rank, slug, title, status, type,
+  priority, assignee, updated), `deps` (from, to, line), `aliases`, `files`
+  (the change markers below), `meta` (schema version, worktree HEAD).
+- **Change markers live in the cache, not in the files.** Putting a marker in
+  each task file would make every sync rewrite files and churn git. Instead,
+  per file the cache stores `(path, mtime_ns, size, sha256)`, same as muninn:
+  1. The worktree HEAD equals the cached HEAD and no file mtime/size changed:
+     nothing to do (one `stat` per file, about 1 ms for 1k tasks).
+  2. mtime or size changed: hash it; if the hash changed, reparse that one
+     file and update its rows (and only the deps edges that touch it).
+  3. HEAD moved (pull, checkout): `git diff --name-status old..new` lists
+     exactly the changed files, even if git preserved mtimes. A rename
+     (new folder, rank or slug) only updates path/group/rank/slug: same id,
+     no reparse, no other row touched.
+  4. Schema version changed (new huginn): full rebuild.
+- Every command runs the check first, so an edit made in a text editor or by
+  another agent is visible on the next command. No daemon needed.
 
 ### Verified in a throwaway repo (git 2.54.0, 2026-11-05)
 
@@ -91,16 +147,18 @@ Status: DRAFT. Q1-Q5 decided by the user 2026-11-05 13:36 (see Decisions).
     100 x 10k / 1.07e9 = 0.09 %.
   - A clash that still happens is caught by `lint` (duplicate id) at sync and
     fixed by `huginn reid <file>`.
-- Never changes. File name = id. Title lives only inside the file.
+- Never changes. It is in the file name and the frontmatter; title, slug,
+  folder and rank are all free to change around it.
 - Short refs: any unique prefix works (`huginn show k7m`).
 - Imported ids (`STATBUS-093`) kept as `aliases:`, resolvable everywhere.
 
 ## Ordering
 
-- `rank:` a lexorank string (base62, `a0`, `a0V`, ...). Moving a task between
-  two others writes a key between theirs: one file changes.
+- Rank is the optional file name prefix: any string, compared bytewise.
+  huginn generates lexorank keys (base62) between neighbours, so a move
+  renames one file. Humans may use numbers; pad them (`100`, `150`).
 - Ties (seen in statbus) break by id, so order is total and stable.
-- Rebalance only when a key grows past 12 chars, as one commit.
+- Rebalance only when a key grows past 12 chars, as one rename commit.
 - `priority:` kept as a label for filtering, not for order.
 
 ## File format
@@ -111,11 +169,9 @@ id: k7m2qx
 title: Recall gate drops hits when embedding fails
 status: todo            # todo | doing | done | dropped   (fixed, D1)
 type: bug               # feature | bug | chore | spike | docs (fixed, D3)
-rank: a0V
 priority: high          # optional
 assignee: []            # names; `take` sets it
 labels: [recall, bug]
-deps: [p3rt9a]          # ids or aliases
 aliases: [STATBUS-093]  # optional
 created: 2026-11-05
 updated: 2026-11-05
@@ -123,6 +179,9 @@ updated: 2026-11-05
 
 ## Goal
 One paragraph: what done looks like and why.
+
+## Depends on
+- p3rt9a Embedding client retries
 
 ## Acceptance
 - [ ] observable check 1
@@ -132,7 +191,14 @@ One paragraph: what done looks like and why.
 Free text, evidence, decisions. Any other `##` sections are kept as-is.
 ```
 
-- Required: id, title, status, rank, Goal, Acceptance with >= 1 item.
+- Required: id, title, status, Goal, Acceptance with >= 1 item.
+- **Dependencies are the id only** (D9). Each `## Depends on` item starts
+  with an id (or alias); the rest of the line is a free note for humans. No
+  path is stored, so moving, renaming, re-slugging or reprioritising a task
+  never touches any other file, and never makes a dependency stale. `huginn
+  show` prints each dependency with its current title, status and path,
+  resolved through the cache. Links elsewhere in the body are references,
+  not dependencies.
 - `huginn lint` reports `file:line: problem` (missing field, unknown status,
   dangling dep, dep cycle, duplicate id, done with unchecked acceptance).
 - Unknown frontmatter keys and sections round-trip untouched.
