@@ -164,10 +164,13 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 
 ## Open questions (proposed answers, awaiting the user)
 
-- **Q6** branch name now that it holds tasks and memories. Proposal: `ravens`
-  (Huginn and Muninn are Odin's ravens). Neutral for muninn-only users, and
-  unlikely to clash with an existing branch, unlike `notes`. Worktree stays
-  `.huginn/`... or `.ravens/` to match.
+- **D6 (user, 15:47) one branch per tool, not a shared `ravens` branch.**
+  Tasks live on branch `huginn` (worktree `.huginn/`), memories on branch
+  `muninn` (worktree `.muninn/`). Separate things stay separate, even though
+  the same git-branch code drives both (one shared Go package, used by both
+  binaries). Consequence for muninn: today `.muninn/memories.jsonl` is tracked
+  on main; migration removes it from main in one commit and moves it onto the
+  `muninn` branch. This supersedes D4's "same branch" wording.
 - **Q7** `next` ordering. Proposal: rank only; priority is a filter
   (`--priority high`). Evidence: statbus has priority high on 95 of 165 tasks,
   so priority does not separate work; rank does.
