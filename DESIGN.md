@@ -314,6 +314,13 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
   No `--force`. `drop` is always allowed.
 - **D18 (foreman 22:53)** the cache stores dep edges by canonical id;
   unresolvable refs stay as dangling rows for lint.
+- **D19 (foreman 23:32) names must be safe on case-insensitive file systems.**
+  A tie repair produced ranks `A` and `a`, and macOS refused the case-only
+  rename. huginn generates lowercase-only rank keys (base36, 0-9a-z, like the
+  lowercase ids), renames to the same file via a temp name, and lint flags
+  names that differ only by case. Human-typed uppercase ranks still read.
+- **D20 (foreman 23:32)** the TUI takes an optional `Take` hook from the CLI
+  so `t` goes through the same push-lock as `huginn take`.
 
 ## Build plan (approved 22:36, lanes started)
 
