@@ -228,7 +228,7 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 | `move id --before/--after/--top` | rerank, one file |
 | `take id` | pull, set assignee + doing, commit, push (push is the lock) |
 | `done id` | status done; warns on unchecked acceptance |
-| `next [--type --label --mine]` | top unblocked, untaken todo (the compass) |
+| `next [--type --priority --label --group --mine]` | top unblocked, untaken todo in rank order within the filter (D12) |
 | `types` | the fixed types with one-line descriptions |
 | `lint` | format check |
 | `sync` | commit, pull --rebase, push |
@@ -241,7 +241,7 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 - `ls` on 10k tasks: < 50 ms warm (cache), < 1 s cold.
 - `new`/`move`/`done`: < 20 ms excluding git push.
 
-## Open questions (proposed answers, awaiting the user)
+## Decisions log continues above; open questions: none (2026-11-05 15:52)
 
 - **D6 (user, 15:47) one branch per tool, not a shared `ravens` branch.**
   Tasks live on branch `huginn` (worktree `.huginn/`), memories on branch
@@ -250,9 +250,13 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
   binaries). Consequence for muninn: today `.muninn/memories.jsonl` is tracked
   on main; migration removes it from main in one commit and moves it onto the
   `muninn` branch. This supersedes D4's "same branch" wording.
-- **Q7** `next` ordering. Proposal: rank only; priority is a filter
-  (`--priority high`). Evidence: statbus has priority high on 95 of 165 tasks,
-  so priority does not separate work; rank does.
+- **D11 (user 15:52) rank stays in the file name.**
+- **D12 (user 15:52) `next` orders by rank; filters narrow it.** `huginn
+  next` returns the top-ranked unblocked, untaken todo. Filters combine:
+  `--priority high`, `--type bug`, `--label recall`, `--group auth`,
+  `--mine`. So "next high-priority bug" is `next --type bug --priority
+  high`, still in rank order within that set. `--json` for agents; exit 4
+  when nothing matches.
 
 ## Build plan (proposed lanes, needs approval before any spawn)
 
@@ -260,8 +264,8 @@ Phase 1, two lanes in parallel, disjoint write paths:
 
 | Lane | Writes | Delivers | Gate |
 |---|---|---|---|
-| core | `internal/task`, `internal/id`, `internal/rank` | parse/serialise (round-trips unknown keys), lint with `file:line`, ids, lexorank, deps cycle check | fuzz: no panic on any bytes; round-trip byte-identical |
-| git | `internal/gitstore` | init (orphan worktree + exclude), sync, `take` lock via push | the throwaway two-clone race above as a Go test |
+| core | `internal/task`, `internal/id`, `internal/rank`, `internal/cache` | parse/serialise (round-trips unknown keys), `[rank.]id.slug.md` names, id+slug resolver, lexorank, deps by id + cycle check, lint `file:line`, SQLite cache synced from disk (markers in cache, rename = row update) | fuzz: no panic on any bytes; round-trip byte-identical; delete cache -> rebuild equals incremental; move/re-slug/rerank never edits another file |
+| git | `internal/gitbranch` (shared with muninn) | orphan branch + worktree + exclude, sync, `take` lock via push | the two-clone race as a Go test; same package drives a second branch name |
 
 Phase 2, three lanes in parallel, after phase 1 lands:
 
