@@ -135,6 +135,48 @@ func TestUsageAndText(t *testing.T) {
 		}
 	}
 }
+func TestIdentityAndCommandHelp(t *testing.T) {
+	a := app(t)
+	t.Setenv("HUGINN_USER", "")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "no-global"))
+	r := execute(t, a, "new", "Identity", "--goal", "G", "--accept", "C")
+	id := r["task"].(Reply)["id"].(string)
+	r = execute(t, a, "take", id)
+	if got := r["task"].(Reply)["assignee"].([]any); len(got) != 1 || got[0] != "Test" {
+		t.Fatal(got)
+	}
+	git(t, a.Cwd, "config", "--unset", "user.name")
+	expectCode(t, a, 2, "next", "--mine")
+	expectCode(t, a, 2, "take", id)
+	r = execute(t, a, "help", "new")
+	if !strings.Contains(r["help"].(string), "--dep") || !strings.Contains(r["help"].(string), "--group") {
+		t.Fatal(r)
+	}
+	execute(t, a, "next", "--help")
+	expectCode(t, a, 2, "help", "nex")
+}
+
+func TestRejectedSetIsUnchanged(t *testing.T) {
+	a := app(t)
+	r := execute(t, a, "new", "Keep title", "--goal", "G", "--accept", "C")
+	id := r["task"].(Reply)["id"].(string)
+	expectCode(t, a, 2, "set", id, "--status", "doing", "--title", "")
+	expectCode(t, a, 2, "set", id, "--type", "bugs")
+	r = execute(t, a, "show", id)
+	if r["task"].(Reply)["title"] != "Keep title" || r["task"].(Reply)["status"] != "todo" {
+		t.Fatal(r)
+	}
+	a.Out = &bytes.Buffer{}
+	a.Err = &bytes.Buffer{}
+	if a.Run(context.Background(), []string{"unknown\ncommand"}) != 2 {
+		t.Fatal("usage code")
+	}
+	if len(strings.Split(strings.TrimSpace(a.Err.(*bytes.Buffer).String()), "\n")) != 2 {
+		t.Fatal(a.Err)
+	}
+}
+
 func TestJSONErrors(t *testing.T) {
 	a := app(t)
 	if code := a.Run(context.Background(), []string{"ls", "--status", "don", "--json"}); code != 2 {

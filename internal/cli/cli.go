@@ -43,6 +43,8 @@ Use --json with any command. IDs, unique prefixes, slugs and aliases work.
   tui                       huginn tui
   mcp                       huginn mcp
   help                      huginn help
+New flags: --dep ID (repeatable), --group FOLDER, --label LABEL, --top, --after ID.
+Details: huginn help COMMAND (for every flat flag and examples).
 Identity: HUGINN_USER, otherwise git config user.name.
 Exit: 0 success, 1 error, 2 usage, 3 blocked, 4 no next task.
 next: huginn next
@@ -118,6 +120,28 @@ func (a *App) open(ctx context.Context) (*session, error) {
 	}
 	return &session{r, c, s}, nil
 }
+func (a *App) refreshExisting(ctx context.Context) error {
+	cwd := a.Cwd
+	if cwd == "" {
+		cwd = "."
+	}
+	c := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--show-toplevel")
+	b, e := c.Output()
+	if e != nil {
+		return nil
+	}
+	if _, e = os.Lstat(filepath.Join(strings.TrimSpace(string(b)), ".huginn")); os.IsNotExist(e) {
+		return nil
+	} else if e != nil {
+		return e
+	}
+	s, e := a.open(ctx)
+	if e != nil {
+		return e
+	}
+	return s.c.Close()
+}
+
 func (a *App) identity(ctx context.Context) (string, error) {
 	if u := strings.TrimSpace(os.Getenv("HUGINN_USER")); u != "" {
 		return u, nil
@@ -274,6 +298,9 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		return nil, e
 	}
 	if f.has("help") || cmd == "help" {
+		if e = a.refreshExisting(ctx); e != nil {
+			return nil, e
+		}
 		target := cmd
 		if cmd == "help" {
 			if len(f.args) > 1 {
@@ -291,6 +318,9 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		return Reply{"help": commandHelp(target), "next": "huginn next"}, nil
 	}
 	if cmd == "types" {
+		if e = a.refreshExisting(ctx); e != nil {
+			return nil, e
+		}
 		if e = f.count(0); e != nil {
 			return nil, e
 		}
@@ -322,11 +352,26 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 	if filter.Type != "" && !slices.Contains(task.Types, filter.Type) {
 		e := task.Invalid("type", filter.Type, task.Types)
 		e.Fix = "huginn " + cmd + " --type " + e.Closest
+		if cmd == "set" && len(f.args) == 1 {
+			if d, err := s.s.Get(f.args[0]); err == nil {
+				e.ID = d.Task.ID
+				e.Fix = "huginn set " + d.Task.ID + " --type " + e.Closest
+			}
+		}
+		if cmd == "new" {
+			e.Fix = `huginn new "title" --goal "outcome" --accept "observable check" --type ` + e.Closest
+		}
 		return nil, e
 	}
 	if filter.Status != "" && !slices.Contains(task.Statuses, filter.Status) {
 		e := task.Invalid("status", filter.Status, task.Statuses)
 		e.Fix = "huginn ls --status " + e.Closest
+		if cmd == "set" && len(f.args) == 1 {
+			if d, err := s.s.Get(f.args[0]); err == nil {
+				e.ID = d.Task.ID
+				e.Fix = "huginn set " + d.Task.ID + " --status " + e.Closest
+			}
+		}
 		return nil, e
 	}
 	var r task.Result
@@ -444,6 +489,9 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		}
 		if count == 0 {
 			return nil, usage("set needs a field: --priority, --type, --label, --status, --title, --assignee", "huginn show "+f.args[0])
+		}
+		if f.has("title") && strings.TrimSpace(f.get("title")) == "" {
+			return nil, usage("title must not be empty", "huginn show "+f.args[0])
 		}
 		if v := f.get("status"); v != "" && !slices.Contains(task.Statuses, v) {
 			return nil, task.Invalid("status", v, task.Statuses)
@@ -588,6 +636,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	jsonMode := isJSON(args)
 	if e != nil {
 		code, p, fix := ErrorDetails(e)
+		p = strings.NewReplacer("\r", " ", "\n", "; ").Replace(p)
 		if jsonMode {
 			_ = json.NewEncoder(a.Out).Encode(Reply{"error": p, "fix": fix, "next": fix, "exit_code": code})
 		} else {
