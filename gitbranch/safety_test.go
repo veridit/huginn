@@ -118,3 +118,25 @@ func TestFullSnapshotAndLiteralPaths(t *testing.T) {
 	clean(t, r.Dir)
 	clean(t, root)
 }
+
+func TestExistingRebaseIsNotTouched(t *testing.T) {
+	a, b := pair(t)
+	writeFile(t, a, "task.md", "alice\n")
+	must(t, a.Sync())
+	writeFile(t, b, "task.md", "bob\n")
+	must(t, b.Commit(nil, "bob"))
+	_, err := b.fetch()
+	must(t, err)
+	if _, err = b.git("rebase", b.remoteRef()); err == nil {
+		t.Fatal("expected manual rebase conflict")
+	}
+	defer func() { _, _ = b.git("rebase", "--abort") }()
+	var typed *Error
+	if err = b.Sync(); !errors.As(err, &typed) || typed.Op != "worktree busy" {
+		t.Fatalf("expected busy error: %v", err)
+	}
+	gitdir := command(t, b.Dir, "rev-parse", "--absolute-git-dir")
+	if _, err = os.Stat(filepath.Join(gitdir, "rebase-merge")); err != nil {
+		t.Fatalf("manual rebase was touched: %v", err)
+	}
+}

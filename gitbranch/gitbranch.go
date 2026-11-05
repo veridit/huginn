@@ -60,7 +60,7 @@ func quote(s string) string {
 	if runtime.GOOS == "windows" {
 		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
 	}
-	return "\"" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "\"", "\\\"") + "\""
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 func (r *Repository) fix(args string) string { return "git -C " + quote(r.Dir) + " " + args }
 func (r *Repository) runAt(dir string, args ...string) (string, error) {
@@ -302,6 +302,9 @@ func (r *Repository) DiffNameStatus(old, new string) ([]Change, error) {
 // Commit stages only paths in this worktree. Empty paths means all changes.
 // Existing staged changes are refused so an explicit paths list cannot leak them.
 func (r *Repository) Commit(paths []string, message string) error {
+	if e := r.checkIdle(); e != nil {
+		return e
+	}
 	staged, e := r.git("diff", "--cached", "--name-only")
 	if e != nil {
 		return e
@@ -397,6 +400,9 @@ func (r *Repository) Sync() error {
 // never discards unrelated edits. fn may read/write Dir but must not run Git.
 // On callback failure its edits are preserved, without committing or pushing.
 func (r *Repository) Update(fn func(*Repository) error) error {
+	if e := r.checkIdle(); e != nil {
+		return e
+	}
 	status, e := r.git("status", "--porcelain")
 	if e != nil {
 		return e
@@ -452,4 +458,20 @@ func exitCode(err error) int {
 		return e.ExitCode()
 	}
 	return -1
+}
+
+// Never adopt or abort an operation started by a human or another process.
+func (r *Repository) checkIdle() error {
+	dir, e := r.git("rev-parse", "--absolute-git-dir")
+	if e != nil {
+		return e
+	}
+	for _, item := range []struct{ path, abort string }{{"rebase-merge", "rebase --abort"}, {"rebase-apply", "rebase --abort"}, {"MERGE_HEAD", "merge --abort"}, {"CHERRY_PICK_HEAD", "cherry-pick --abort"}, {"REVERT_HEAD", "revert --abort"}} {
+		if _, e := os.Stat(filepath.Join(dir, item.path)); e == nil {
+			return &Error{Op: "worktree busy", Detail: "existing Git operation: " + item.path, Fix: r.fix(item.abort)}
+		} else if !os.IsNotExist(e) {
+			return r.ioerr(e)
+		}
+	}
+	return nil
 }

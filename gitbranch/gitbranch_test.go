@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func command(t *testing.T, dir string, args ...string) string {
@@ -139,6 +140,9 @@ func TestTakeRace(t *testing.T) {
 	a, b := pair(t)
 	ready := make(chan struct{}, 2)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
 	for i, r := range []*Repository{a, b} {
@@ -160,9 +164,16 @@ func TestTakeRace(t *testing.T) {
 			})
 		}(r, name)
 	}
-	<-ready
-	<-ready
-	close(release)
+	for range 2 {
+		select {
+		case <-ready:
+		case e := <-errs:
+			t.Fatalf("update failed before race barrier: %v", e)
+		case <-time.After(30 * time.Second):
+			t.Fatal("update did not reach race barrier")
+		}
+	}
+	unblock()
 	wg.Wait()
 	close(errs)
 	wins, races := 0, 0
