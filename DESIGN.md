@@ -151,12 +151,17 @@ the cache in the same step.
   folder and rank are all free to change around it.
 - **Every task has two names (D10, user 15:50): the id for machines, the
   slug for humans.** `new` derives the slug from the title (lowercase,
-  dashes, at most 6 words), and it stays put when the title is later edited
-  unless someone renames it. Everything huginn prints shows both, `k7m2qx
-  recall-gate-drops-hits`, in `ls`, `next`, `show`, lint messages and MCP
-  results, so people read the slug and agents copy the id. Lookup accepts
-  either: an id or unique id prefix, or a unique slug (an ambiguous slug
-  lists the matching ids and exits 2).
+  dashes, at most 6 words); it stays put when the title is later edited
+  unless someone renames it.
+  - **Humans see the slug.** TUI, web UI, and default CLI output lead with
+    the slug and title; the id appears dimmed for copying
+    (`recall-gate-drops-hits  Recall gate drops hits...  k7m2qx`).
+  - **Under the hood it is always the id.** Files, dependencies, the cache,
+    git commit messages, `--json`, MCP results, exit messages for agents,
+    and every write path resolve to the id first and use only the id.
+  - Input accepts either: an id, a unique id prefix, or a unique slug. A slug
+    is resolved to its id once, at the edge; an ambiguous slug lists the
+    matching `slug  id` pairs and exits 2.
 - Short refs: any unique prefix works (`huginn show k7m`).
 - Imported ids (`STATBUS-093`) kept as `aliases:`, resolvable everywhere.
 
