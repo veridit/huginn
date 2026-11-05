@@ -4,7 +4,31 @@ Huginn is Odin's raven of thought. muninn remembers; huginn keeps you heading
 straight. A fast, crash-proof task tracker for people and agents, one markdown
 file per task, kept on its own git branch.
 
-Status: DRAFT for discussion. Open questions are marked **Q**.
+Status: DRAFT. Q1-Q5 decided by the user 2026-11-05 13:36 (see Decisions).
+
+## Decisions (user, 2026-11-05 13:36)
+
+- **Built for AI first**, not the world's best ticket system. Standalone: install,
+  run, use from the CLI. Same for muninn.
+- **D1 statuses are fixed**: `todo | doing | done | dropped`. Not configurable.
+- **D2 deps block by default** ("AI will often ignore warnings"). Configurable
+  in `huginn.toml` as `deps = "block" | "warn"`. `take` and `done` refuse with
+  exit code 3 and name the open deps.
+- **D3 `next` exists, with filters**: `huginn next --type bug`, `--label`,
+  `--mine`. Adds a `type:` field: `feature | bug | chore | spike | docs`,
+  fixed list, each with a one-line description shown by `huginn types`.
+- **D4 project memories move to the same branch**: muninn writes
+  `memories/` in the `.huginn/` worktree (one shared branch, call it the
+  project-notes branch). Main gets no memory commits, no churn, no pollution.
+- **D5 TUI now, web UI later** for both tools. The web UI runs locally
+  (`huginn serve`, `muninn serve`) so it can be opened from vendor apps
+  (Claude, ChatGPT/Codex, ...) to view and edit tasks and memories.
+- **Later, maybe**: a hosted service (small fee) to view, edit and sync without
+  self-hosting. Its point: not being locked in to one company's tool. Separate
+  design; first make a great tool and use it ourselves.
+- Agent interface rule (from an earlier decision, muninn memory
+  mem_1793616201092): non-interactive commands, `--json` output, clear exit
+  codes and an agent instructions file matter more than MCP. Ship both.
 
 ## Evidence from real use (statbus backlog-md, 2026-11-05)
 
@@ -42,8 +66,7 @@ Status: DRAFT for discussion. Open questions are marked **Q**.
   - `docs/`, `decisions/` optional, same id scheme.
 - `huginn sync`: commit local changes, `pull --rebase`, push. Only the huginn
   branch. Conflicts are per file and rare because each task is its own file.
-- **Q** memories: should `muninn sync` move `.muninn/memories.jsonl` onto the
-  same branch (a `memories/` dir), so main stays clean too?
+- Memories live on the same branch under `memories/` (D4).
 
 ### Verified in a throwaway repo (git 2.54.0, 2026-11-05)
 
@@ -86,7 +109,8 @@ Status: DRAFT for discussion. Open questions are marked **Q**.
 ---
 id: k7m2qx
 title: Recall gate drops hits when embedding fails
-status: todo            # todo | doing | done | dropped   (Q: configurable?)
+status: todo            # todo | doing | done | dropped   (fixed, D1)
+type: bug               # feature | bug | chore | spike | docs (fixed, D3)
 rank: a0V
 priority: high          # optional
 assignee: []            # names; `take` sets it
@@ -125,7 +149,8 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 | `move id --before/--after/--top` | rerank, one file |
 | `take id` | pull, set assignee + doing, commit, push (push is the lock) |
 | `done id` | status done; warns on unchecked acceptance |
-| `next` | top unblocked, untaken todo (the compass) |
+| `next [--type --label --mine]` | top unblocked, untaken todo (the compass) |
+| `types` | the fixed types with one-line descriptions |
 | `lint` | format check |
 | `sync` | commit, pull --rebase, push |
 | `import backlog <dir>` | idempotent, keeps old ids as aliases |
@@ -139,8 +164,6 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 
 ## Open questions
 
-- **Q1** statuses fixed or per project?
-- **Q2** deps: `take` blocks or warns when deps are not done?
-- **Q3** `next` as the agent compass: yes/no, and does it skip `priority`?
-- **Q4** memories on the same branch?
-- **Q5** web UI like muninn, or TUI only at first?
+- **Q6** branch name now that it holds tasks and memories: `huginn`, or a
+  neutral `notes`?
+- **Q7** `next` ordering: rank only, or rank within priority?
