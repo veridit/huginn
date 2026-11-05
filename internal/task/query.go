@@ -7,12 +7,26 @@ import (
 	"strings"
 )
 
-type Match struct{ Slug, ID string }
+type Match struct {
+	Slug string `json:"slug"`
+	ID   string `json:"id"`
+}
+type Unchecked struct {
+	Index int    `json:"index"`
+	Text  string `json:"text"`
+	Fix   string `json:"fix"`
+}
 type Error struct {
-	Kind, ID, Field, Value, Closest, Fix string
-	Valid                                []string
-	Matches                              []Match
-	Dependencies                         []Task
+	Kind         string      `json:"kind"`
+	ID           string      `json:"id,omitempty"`
+	Field        string      `json:"field,omitempty"`
+	Value        string      `json:"value,omitempty"`
+	Closest      string      `json:"closest,omitempty"`
+	Fix          string      `json:"fix,omitempty"`
+	Valid        []string    `json:"valid,omitempty"`
+	Matches      []Match     `json:"matches,omitempty"`
+	Dependencies []Task      `json:"dependencies,omitempty"`
+	Unchecked    []Unchecked `json:"unchecked,omitempty"`
 }
 
 func (e *Error) Error() string {
@@ -35,6 +49,9 @@ func (e *Error) Error() string {
 	for _, d := range e.Dependencies {
 		msg += "\n" + d.ID + " " + d.Title
 	}
+	for _, a := range e.Unchecked {
+		msg += fmt.Sprintf("\n%d. %s\nfix: %s", a.Index, a.Text, a.Fix)
+	}
 	if e.Fix != "" {
 		msg += "\nfix: " + e.Fix
 	}
@@ -42,7 +59,7 @@ func (e *Error) Error() string {
 }
 func (e *Error) ExitCode() int {
 	switch e.Kind {
-	case "blocked":
+	case "blocked", "unchecked-acceptance":
 		return 3
 	case "nothing-matches":
 		return 4
@@ -61,6 +78,15 @@ func Invalid(field, value string, valid []string) *Error {
 		}
 	}
 	return &Error{Kind: "invalid-value", Field: field, Value: value, Valid: valid, Closest: closest, Fix: fmt.Sprintf("huginn set <id> --%s %s", field, closest)}
+}
+func invalidFor(id, field, value string, valid []string) *Error {
+	e := Invalid(field, value, valid)
+	e.ID = id
+	e.Fix = strings.ReplaceAll(e.Fix, "<id>", id)
+	if field == "field" {
+		e.Fix = "huginn set " + id + " --type feature"
+	}
+	return e
 }
 func distance(a, b string) int {
 	p := make([]int, len(b)+1)
@@ -211,5 +237,14 @@ func Lint(docs []*Document) []Finding {
 			out = append(out, Finding{t.Path, 1, "dependency cycle involving " + t.ID})
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		if out[i].Line != out[j].Line {
+			return out[i].Line < out[j].Line
+		}
+		return out[i].Problem < out[j].Problem
+	})
 	return out
 }

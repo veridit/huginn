@@ -22,6 +22,10 @@ func (d *Document) parseFrontmatter() {
 	for n := 0; n+1 < len(mapping.Content); n += 2 {
 		key, value := mapping.Content[n], mapping.Content[n+1]
 		k := key.Value
+		if key.Column != 1 {
+			d.frontmatterValid = false
+			d.add(key.Line+1, "frontmatter fields must start on separate lines")
+		}
 		if key.Kind != yaml.ScalarNode {
 			d.add(key.Line+1, "frontmatter keys must be strings")
 			continue

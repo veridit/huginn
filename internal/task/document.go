@@ -16,22 +16,22 @@ var Statuses = []string{"todo", "doing", "done", "dropped"}
 var Types = []string{"feature", "bug", "chore", "spike", "docs"}
 
 type Finding struct {
-	Path    string
-	Line    int
-	Problem string
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Problem string `json:"problem"`
 }
 
 func (f Finding) String() string { return fmt.Sprintf("%s:%d: %s", f.Path, f.Line, f.Problem) }
 
 type Dependency struct {
-	Ref  string
-	Line int
-	Note string
+	Ref  string `json:"ref"`
+	Line int    `json:"line"`
+	Note string `json:"note,omitempty"`
 }
 type Acceptance struct {
-	Text    string
-	Checked bool
-	Line    int
+	Text    string `json:"text"`
+	Checked bool   `json:"checked"`
+	Line    int    `json:"line"`
 }
 type Task struct {
 	ID           string       `json:"id"`

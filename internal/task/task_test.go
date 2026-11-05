@@ -189,6 +189,10 @@ func TestOperationsIsolationAndLifecycle(t *testing.T) {
 	if _, e = s.Take(b.ID, "alice"); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = s.Done(b.ID); e == nil {
+		t.Fatal("unchecked acceptance did not block")
+	}
+	s.AcceptanceMode = "warn"
 	r, e = s.Done(b.ID)
 	if e != nil || len(r.Warnings) != 1 {
 		t.Fatal(r, e)

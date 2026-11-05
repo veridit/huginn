@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/veridit/huginn/internal/id"
-	"github.com/veridit/huginn/internal/rank"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -16,6 +16,8 @@ type Result struct {
 	Changed  bool     `json:"changed"`
 	Next     string   `json:"next"`
 	Warnings []string `json:"warnings,omitempty"`
+	Renamed  []string `json:"renamed,omitempty"`
+	Renames  []Rename `json:"renames,omitempty"`
 }
 type NewOptions struct {
 	Title, Goal, Group, Type, Priority string
@@ -35,9 +37,10 @@ type MoveOptions struct {
 // Store exposes filesystem operations. Cache integration is supplied via Refresh,
 // which must sync and return the current tree, before and after each operation.
 type Store struct {
-	Root     string
-	DepsMode string
-	Refresh  func() ([]Task, error)
+	Root           string
+	DepsMode       string
+	AcceptanceMode string
+	Refresh        func() ([]Task, error)
 }
 
 func (s *Store) Tasks() ([]Task, error) {
@@ -138,6 +141,11 @@ func (s *Store) New(o NewOptions) (Result, error) {
 	if strings.TrimSpace(o.Title) == "" || strings.TrimSpace(o.Goal) == "" || len(o.Acceptance) == 0 {
 		return Result{}, &Error{Kind: "missing-required", Fix: "huginn new \"title\" --goal \"outcome\" --accept \"observable check\""}
 	}
+	for _, a := range o.Acceptance {
+		if strings.TrimSpace(a) == "" {
+			return Result{}, &Error{Kind: "empty-acceptance", Fix: "huginn new \"title\" --goal \"outcome\" --accept \"observable check\""}
+		}
+	}
 	if e := safeGroup(o.Group); e != nil {
 		return Result{}, e
 	}
@@ -167,9 +175,15 @@ func (s *Store) New(o NewOptions) (Result, error) {
 		}
 		deps = append(deps, t.ID)
 	}
-	r, e := position(ts, "", MoveOptions{Top: o.Top, After: o.After})
+	plan, e := rankPlan(ts, Task{ID: i}, MoveOptions{Top: o.Top, After: o.After})
 	if e != nil {
 		return Result{}, e
+	}
+	r := ""
+	for _, p := range plan {
+		if p.Task.ID == i {
+			r = p.Rank
+		}
 	}
 	slug := Slug(o.Title)
 	path := filepath.ToSlash(filepath.Join(o.Group, BuildName(r, i, slug)))
@@ -190,22 +204,38 @@ func (s *Store) New(o NewOptions) (Result, error) {
 	}
 	body += "\n## Notes\n"
 	d := Parse(path, []byte(body))
-	return s.finish(d, true)
+	if len(d.Findings) > 0 {
+		return Result{}, &Error{Kind: "invalid-task-content", ID: i, Value: d.Findings[0].Problem, Fix: "huginn new \"title\" --goal \"outcome\" --accept \"observable check\""}
+	}
+	created, e := s.finish(d, true)
+	if e != nil {
+		return created, e
+	}
+	otherPlan := []rankChange{}
+	for _, p := range plan {
+		if p.Task.ID != i {
+			otherPlan = append(otherPlan, p)
+		}
+	}
+	repaired, e := s.applyRanks(otherPlan, d.Task)
+	created.Renamed = repaired.Renamed
+	created.Renames = repaired.Renames
+	return created, e
 }
 func (s *Store) Set(ref, field, value string) (Result, error) {
 	if field == "status" {
 		return s.Transition(ref, value, "")
 	}
-	valid := []string{"title", "type", "priority", "label", "assignee"}
-	if !contains(valid, field) {
-		return Result{}, Invalid("field", field, valid)
-	}
-	if field == "type" && !contains(Types, value) {
-		return Result{}, Invalid("type", value, Types)
-	}
 	d, _, e := s.load(ref)
 	if e != nil {
 		return Result{}, e
+	}
+	valid := []string{"title", "type", "priority", "label", "assignee"}
+	if !contains(valid, field) {
+		return Result{}, invalidFor(d.Task.ID, "field", field, valid)
+	}
+	if field == "type" && !contains(Types, value) {
+		return Result{}, invalidFor(d.Task.ID, "type", value, Types)
 	}
 	before := string(d.Bytes())
 	var v any = value
@@ -244,12 +274,12 @@ func (s *Store) Take(ref, user string) (Result, error) { return s.Transition(ref
 func (s *Store) Done(ref string) (Result, error)       { return s.Transition(ref, "done", "") }
 func (s *Store) Drop(ref string) (Result, error)       { return s.Transition(ref, "dropped", "") }
 func (s *Store) Transition(ref, status, user string) (Result, error) {
-	if !contains(Statuses, status) {
-		return Result{}, Invalid("status", status, Statuses)
-	}
 	d, ts, e := s.load(ref)
 	if e != nil {
 		return Result{}, e
+	}
+	if !contains(Statuses, status) {
+		return Result{}, invalidFor(d.Task.ID, "status", status, Statuses)
 	}
 	if d.Task.Status == status && (status != "doing" || user == "" || contains(d.Task.Assignee, user)) {
 		return s.finish(d, false)
@@ -257,24 +287,45 @@ func (s *Store) Transition(ref, status, user string) (Result, error) {
 	if status == "doing" && user != "" && len(d.Task.Assignee) > 0 && !contains(d.Task.Assignee, user) {
 		return Result{}, &Error{Kind: "taken", ID: d.Task.ID, Value: strings.Join(d.Task.Assignee, ", "), Fix: "huginn next"}
 	}
-	policy := s.DepsMode
-	if policy == "" {
-		policy, e = DepsPolicy(s.Root)
-		if e != nil {
-			return Result{}, e
-		}
-	}
-	if !contains([]string{"block", "warn"}, policy) {
-		return Result{}, Invalid("deps", policy, []string{"block", "warn"})
-	}
 	var warnings []string
 	if status == "doing" || status == "done" {
+		policy := s.DepsMode
+		if policy == "" {
+			policy, e = DepsPolicy(s.Root)
+			if e != nil {
+				return Result{}, e
+			}
+		}
+		if !contains([]string{"block", "warn"}, policy) {
+			return Result{}, Invalid("deps", policy, []string{"block", "warn"})
+		}
 		blocked := Blocked(d.Task, ts)
 		if len(blocked) > 0 {
 			if policy != "warn" {
 				return Result{}, &Error{Kind: "blocked", ID: d.Task.ID, Dependencies: blocked, Fix: "huginn show " + blocked[0].ID}
 			}
 			warnings = append(warnings, "open dependencies")
+		}
+	}
+	if status == "done" {
+		policy := s.AcceptanceMode
+		if policy == "" {
+			policy, e = AcceptancePolicy(s.Root)
+			if e != nil {
+				return Result{}, e
+			}
+		}
+		if !contains([]string{"block", "warn"}, policy) {
+			return Result{}, Invalid("acceptance", policy, []string{"block", "warn"})
+		}
+		unchecked := []Unchecked{}
+		for n, a := range d.Task.Acceptance {
+			if !a.Checked {
+				unchecked = append(unchecked, Unchecked{Index: n + 1, Text: a.Text, Fix: fmt.Sprintf("huginn check %s %d", d.Task.ID, n+1)})
+			}
+		}
+		if len(unchecked) > 0 && policy != "warn" {
+			return Result{}, &Error{Kind: "unchecked-acceptance", ID: d.Task.ID, Unchecked: unchecked, Fix: unchecked[0].Fix}
 		}
 	}
 	if e = d.SetField("status", status); e != nil {
@@ -302,8 +353,11 @@ func Next(tasks []Task, f Filter) (Result, error) {
 	}
 	ts := append([]Task(nil), tasks...)
 	Sort(ts)
+	if f.Mine != "" {
+		sort.SliceStable(ts, func(i, j int) bool { return ts[i].Status == "doing" && ts[j].Status != "doing" })
+	}
 	for _, t := range ts {
-		if t.Status != "todo" || len(Blocked(t, tasks)) > 0 {
+		if (t.Status != "todo" && !(f.Mine != "" && t.Status == "doing")) || len(Blocked(t, tasks)) > 0 {
 			continue
 		}
 		if f.Mine != "" {
@@ -320,57 +374,8 @@ func Next(tasks []Task, f Filter) (Result, error) {
 	}
 	return Result{}, &Error{Kind: "nothing-matches", Fix: "huginn ls"}
 }
-func position(ts []Task, skip string, o MoveOptions) (string, error) {
-	if (o.Before != "" && o.After != "") || (o.Top && (o.Before != "" || o.After != "")) {
-		return "", &Error{Kind: "conflicting-position", Fix: "huginn move <id> --top"}
-	}
-	var sorted []Task
-	for _, t := range ts {
-		if t.ID != skip {
-			sorted = append(sorted, t)
-		}
-	}
-	Sort(sorted)
-	at := len(sorted)
-	if o.Top {
-		at = 0
-	}
-	ref := o.Before
-	if ref == "" {
-		ref = o.After
-	}
-	if ref != "" {
-		target, e := Resolve(ts, ref)
-		if e != nil {
-			return "", e
-		}
-		if target.ID == skip {
-			return "", &Error{Kind: "self-position", ID: skip, Fix: "huginn move " + skip + " --top"}
-		}
-		for n, t := range sorted {
-			if t.ID == target.ID {
-				at = n
-				if o.After != "" {
-					at++
-				}
-				break
-			}
-		}
-	}
-	a, b := "", ""
-	if at > 0 {
-		a = sorted[at-1].Rank
-	}
-	if at < len(sorted) {
-		b = sorted[at].Rank
-	}
-	r, e := rank.Between(a, b)
-	if e == nil && rank.NeedsRebalance(r) {
-		return "", &Error{Kind: "rebalance-required", Fix: "huginn rebalance"}
-	}
-	return r, e
-}
 func (s *Store) rename(d *Document, group, r, slug string) (Result, error) {
+	oldPath := d.Task.Path
 	if e := safeGroup(group); e != nil {
 		return Result{}, e
 	}
@@ -412,18 +417,18 @@ func (s *Store) rename(d *Document, group, r, slug string) (Result, error) {
 			return Result{}, e
 		}
 	}
-	return Result{Task: d.Task, Changed: true, Next: hint(d.Task)}, nil
+	return Result{Task: d.Task, Changed: true, Next: hint(d.Task), Renamed: []string{d.Task.ID}, Renames: []Rename{{ID: d.Task.ID, From: oldPath, To: path}}}, nil
 }
 func (s *Store) Move(ref string, o MoveOptions) (Result, error) {
 	d, ts, e := s.load(ref)
 	if e != nil {
 		return Result{}, e
 	}
-	r, e := position(ts, d.Task.ID, o)
+	plan, e := rankPlan(ts, d.Task, o)
 	if e != nil {
 		return Result{}, e
 	}
-	return s.rename(d, d.Task.Group, r, d.Task.Slug)
+	return s.applyRanks(plan, d.Task)
 }
 func (s *Store) MoveGroup(ref, group string) (Result, error) {
 	d, _, e := s.load(ref)

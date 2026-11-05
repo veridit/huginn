@@ -17,7 +17,7 @@ import (
 	"sync"
 )
 
-const SchemaVersion = "1"
+const SchemaVersion = "2"
 
 type Change struct{ Status, OldPath, Path string }
 type Git interface {
@@ -81,7 +81,7 @@ func Open(root, dbPath string, git Git) (*Cache, error) {
 			return fail(e)
 		}
 	}
-	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS tasks(id TEXT NOT NULL,path TEXT PRIMARY KEY,"group" TEXT,rank TEXT,slug TEXT,title TEXT,status TEXT,type TEXT,priority TEXT,assignee TEXT,updated TEXT,payload TEXT NOT NULL,findings TEXT NOT NULL); CREATE INDEX IF NOT EXISTS tasks_id ON tasks(id); CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY,mtime_ns INTEGER NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL); CREATE TABLE IF NOT EXISTS deps("from" TEXT NOT NULL,"to" TEXT NOT NULL,line INTEGER NOT NULL,path TEXT NOT NULL); CREATE INDEX IF NOT EXISTS deps_from ON deps("from"); CREATE INDEX IF NOT EXISTS deps_to ON deps("to"); CREATE INDEX IF NOT EXISTS deps_path ON deps(path); CREATE TABLE IF NOT EXISTS aliases(alias TEXT NOT NULL,id TEXT NOT NULL,path TEXT NOT NULL); CREATE INDEX IF NOT EXISTS aliases_alias ON aliases(alias); CREATE INDEX IF NOT EXISTS aliases_path ON aliases(path);`)
+	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS tasks(id TEXT NOT NULL,path TEXT PRIMARY KEY,"group" TEXT,rank TEXT,slug TEXT,title TEXT,status TEXT,type TEXT,priority TEXT,assignee TEXT,updated TEXT,payload TEXT NOT NULL,findings TEXT NOT NULL); CREATE INDEX IF NOT EXISTS tasks_id ON tasks(id); CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY,mtime_ns INTEGER NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL); CREATE TABLE IF NOT EXISTS deps("from" TEXT NOT NULL,"to" TEXT NOT NULL,line INTEGER NOT NULL,path TEXT NOT NULL,ref TEXT NOT NULL,ref_key TEXT NOT NULL); CREATE INDEX IF NOT EXISTS deps_ref_key ON deps(ref_key); CREATE INDEX IF NOT EXISTS deps_from ON deps("from"); CREATE INDEX IF NOT EXISTS deps_to ON deps("to"); CREATE INDEX IF NOT EXISTS deps_path ON deps(path); CREATE TABLE IF NOT EXISTS aliases(alias TEXT NOT NULL,id TEXT NOT NULL,path TEXT NOT NULL); CREATE INDEX IF NOT EXISTS aliases_alias ON aliases(alias); CREATE INDEX IF NOT EXISTS aliases_path ON aliases(path);`)
 	if e != nil {
 		return fail(e)
 	}
@@ -273,6 +273,11 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 	if len(changed) == 0 && len(removed) == 0 && head == c.head && !c.rebuild {
 		return stats, nil
 	}
+	canonical := canonicalizer(next)
+	var affected map[string]string
+	if len(c.files) > 0 && !c.rebuild {
+		affected = affectedReferences(c.files, next, renames)
+	}
 	tx, e := c.db.BeginTx(ctx, nil)
 	if e != nil {
 		return stats, e
@@ -308,7 +313,7 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 		return stats, e
 	}
 	defer taskStmt.Close()
-	fileStmt, e := tx.PrepareContext(ctx, `INSERT OR REPLACE INTO files(path,mtime_ns,size,sha256) VALUES(?,?,?,?)`)
+	fileStmt, e := tx.PrepareContext(ctx, `INSERT INTO files(path,mtime_ns,size,sha256) VALUES(?,?,?,?) ON CONFLICT(path) DO UPDATE SET mtime_ns=excluded.mtime_ns,size=excluded.size,sha256=excluded.sha256`)
 	if e != nil {
 		return stats, e
 	}
@@ -344,7 +349,8 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 			}
 		}
 		for _, d := range t.Dependencies {
-			if e = exec(`INSERT INTO deps("from","to",line,path) VALUES(?,?,?,?)`, t.ID, d.Ref, d.Line, p); e != nil {
+			to, _ := canonical(d.Ref)
+			if e = exec(`INSERT INTO deps("from","to",line,path,ref,ref_key) VALUES(?,?,?,?,?,?)`, t.ID, to, d.Line, p, d.Ref, strings.ToLower(d.Ref)); e != nil {
 				return stats, e
 			}
 		}
@@ -352,6 +358,17 @@ func (c *Cache) sync(ctx context.Context) (Stats, error) {
 			if e = exec(`INSERT INTO aliases(alias,id,path) VALUES(?,?,?)`, a, t.ID, p); e != nil {
 				return stats, e
 			}
+		}
+	}
+	for key, ref := range affected {
+		to, resolved := canonical(ref)
+		if resolved {
+			e = exec(`UPDATE deps SET "to"=? WHERE ref_key=? AND "to"<>?`, to, key, to)
+		} else {
+			e = exec(`UPDATE deps SET "to"=ref WHERE ref_key=? AND "to"<>ref`, key)
+		}
+		if e != nil {
+			return stats, e
 		}
 	}
 	if e = exec(`INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?),('head',?)`, SchemaVersion, head); e != nil {

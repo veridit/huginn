@@ -17,6 +17,13 @@ import (
 func fixture(i int) []byte {
 	return []byte(fmt.Sprintf("---\nid: %s\ntitle: Task %d\nstatus: todo\ntype: bug\nlabels: [core]\naliases: [OLD-%d]\n---\n\n## Goal\nA visible result.\n\n## Acceptance\n- [ ] passes\n\n## Notes\nEvidence.\n", testID(i), i, i))
 }
+func propertyFixture(i int) []byte {
+	b := fixture(i)
+	if i > 1 {
+		b = append(b, []byte(fmt.Sprintf("\n## Depends on\n- OLD-%d prior task\n", i-1))...)
+	}
+	return b
+}
 func testID(i int) string {
 	const a = "0123456789abcdefghjkmnpqrstvwxyz"
 	b := []byte("000000")
@@ -156,7 +163,7 @@ func TestRebuildEqualsIncrementalRandom(t *testing.T) {
 					counter++
 					p := fmt.Sprintf("A.%s.task.md", testID(counter))
 					paths[counter] = p
-					put(t, root, p, fixture(counter))
+					put(t, root, p, propertyFixture(counter))
 				case 1, 2, 3:
 					ids := make([]int, 0, len(paths))
 					for i := range paths {
@@ -167,7 +174,10 @@ func TestRebuildEqualsIncrementalRandom(t *testing.T) {
 					p := paths[i]
 					switch op {
 					case 1:
-						b := fixture(i)
+						b := propertyFixture(i)
+						if step%4 == 0 {
+							b = []byte(strings.ReplaceAll(string(b), fmt.Sprintf("OLD-%d", i), fmt.Sprintf("NEW-%d-%d", i, step)))
+						}
 						b = append(b, []byte(fmt.Sprintf("\nedit %d\n", step))...)
 						if step%9 == 0 {
 							b = []byte("broken\x00\xff")
@@ -194,6 +204,7 @@ func TestRebuildEqualsIncrementalRandom(t *testing.T) {
 				}
 				if step%10 == 0 || step == 99 {
 					want, wl := normalized(t, c)
+					wantTables := tableState(t, c)
 					if e := c.Close(); e != nil {
 						t.Fatal(e)
 					}
@@ -202,7 +213,7 @@ func TestRebuildEqualsIncrementalRandom(t *testing.T) {
 					}
 					c = openTest(t, root, db, nil)
 					got, gl := normalized(t, c)
-					if !reflect.DeepEqual(want, got) || !reflect.DeepEqual(wl, gl) {
+					if !reflect.DeepEqual(want, got) || !reflect.DeepEqual(wl, gl) || !reflect.DeepEqual(wantTables, tableState(t, c)) {
 						t.Fatalf("seed %d step %d rebuild mismatch\nwant=%+v\ngot=%+v\n%v\n%v", seed, step, want, got, wl, gl)
 					}
 				}
