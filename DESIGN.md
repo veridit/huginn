@@ -162,8 +162,32 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 - `ls` on 10k tasks: < 50 ms warm (cache), < 1 s cold.
 - `new`/`move`/`done`: < 20 ms excluding git push.
 
-## Open questions
+## Open questions (proposed answers, awaiting the user)
 
-- **Q6** branch name now that it holds tasks and memories: `huginn`, or a
-  neutral `notes`?
-- **Q7** `next` ordering: rank only, or rank within priority?
+- **Q6** branch name now that it holds tasks and memories. Proposal: `ravens`
+  (Huginn and Muninn are Odin's ravens). Neutral for muninn-only users, and
+  unlikely to clash with an existing branch, unlike `notes`. Worktree stays
+  `.huginn/`... or `.ravens/` to match.
+- **Q7** `next` ordering. Proposal: rank only; priority is a filter
+  (`--priority high`). Evidence: statbus has priority high on 95 of 165 tasks,
+  so priority does not separate work; rank does.
+
+## Build plan (proposed lanes, needs approval before any spawn)
+
+Phase 1, two lanes in parallel, disjoint write paths:
+
+| Lane | Writes | Delivers | Gate |
+|---|---|---|---|
+| core | `internal/task`, `internal/id`, `internal/rank` | parse/serialise (round-trips unknown keys), lint with `file:line`, ids, lexorank, deps cycle check | fuzz: no panic on any bytes; round-trip byte-identical |
+| git | `internal/gitstore` | init (orphan worktree + exclude), sync, `take` lock via push | the throwaway two-clone race above as a Go test |
+
+Phase 2, three lanes in parallel, after phase 1 lands:
+
+| Lane | Writes | Delivers | Gate |
+|---|---|---|---|
+| cli+mcp | `cmd/huginn`, `internal/mcp` | all commands, `--json`, exit codes (3 = blocked dep), stdio MCP | e2e script over the real binary |
+| tui | `internal/tui` | list + board, never crashes on bad files | pty test like muninn's |
+| import | `internal/importer` | backlog-md import, idempotent, aliases | the 178 statbus tasks import, re-run is a no-op |
+
+Then: muninn writes `memories/` into the same branch (muninn ROADMAP).
+Each lane reports with verbatim test output; the foreman reviews before merge.
