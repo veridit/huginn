@@ -1,0 +1,12 @@
+{
+  "create-bug":[{"path":["tasks",0,"type"],"value":"feature"}],
+  "dependency":[{"path":["tasks",1,"dependencies"],"value":[]}],
+  "next-take":[{"path":["tasks",0,"assignee"],"value":[]}],
+  "finish-by-slug":[{"path":["tasks",0,"acceptance",1,"checked"],"value":false}],
+  "blocked-finish":[{"path":["tasks",1,"notes"],"value":""}],
+  "reorder":[{"path":["tasks",0,"rank"],"value":"z9"}],
+  "move-group":[{"path":["tasks",0,"group"],"value":""}],
+  "drop-duplicate":[{"path":["tasks",1,"status"],"value":"todo"}],
+  "priority-bug":[{"path":["tasks",2,"status"],"value":"todo"}],
+  "sync":[{"path":["remote_matches"],"value":false}]
+}

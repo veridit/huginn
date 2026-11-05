@@ -1,0 +1,12 @@
+{
+  "create-bug":{"tasks":[{"id":"b00001","title":"Login rejects valid email","type":"bug","goal":"Allow valid email addresses to sign in.","acceptance":[{"text":"Valid email signs in","checked":false},{"text":"Invalid email shows an error","checked":false}]}]},
+  "dependency":{"tasks":[{"id":"b00001","title":"Build login API","goal":"Build login API","acceptance":[{"text":"Login API responds","checked":false}]},{"id":"b00002","title":"Wire login form","goal":"Wire login form","dependencies":["b00001"],"acceptance":[{"text":"Login form submits","checked":false}]}]},
+  "next-take":{"tasks":[{"id":"a00001","title":"Repair session expiry","rank":"a0","status":"doing","assignee":["Huginn Eval"]},{"id":"a00002","title":"Polish login copy","rank":"a1"}]},
+  "finish-by-slug":{"tasks":[{"id":"a00001","title":"Repair session expiry","rank":"a0","status":"done","checked":true}]},
+  "blocked-finish":{"tasks":[{"id":"a00001","title":"Build login API","rank":"a0"},{"id":"a00002","title":"Wire login form","rank":"a1","dependencies":["a00001"],"checked":true,"notes":"Blocked by Build login API (a00001), which is still open."}]},
+  "reorder":{"tasks":[{"id":"a00002","title":"Repair session expiry","rank":"Zz"},{"id":"a00001","title":"Polish login copy","rank":"a0"}],"content_before":{"a00001":"sha256:copy","a00002":"sha256:expiry"},"content_after":{"a00001":"sha256:copy","a00002":"sha256:expiry"}},
+  "move-group":{"tasks":[{"id":"a00001","title":"Repair session expiry","rank":"a0","group":"auth"}],"content_before":{"a00001":"sha256:expiry"},"content_after":{"a00001":"sha256:expiry"}},
+  "drop-duplicate":{"tasks":[{"id":"a00001","title":"Repair session expiry","rank":"a0"},{"id":"a00002","title":"Duplicate session expiry report","rank":"a1","status":"dropped"}]},
+  "priority-bug":{"tasks":[{"id":"a00001","title":"Urgent feature","rank":"a0","type":"feature","priority":"high"},{"id":"a00002","title":"Minor bug","rank":"a1","type":"bug","priority":"low"},{"id":"a00003","title":"First urgent bug","rank":"a2","type":"bug","priority":"high","status":"doing","assignee":["Huginn Eval"]},{"id":"a00004","title":"Later urgent bug","rank":"a3","type":"bug","priority":"high"}]},
+  "sync":{"tasks":[{"id":"b00001","title":"Prepare release","type":"chore","goal":"Ship a reproducible release.","acceptance":[{"text":"Release checklist reviewed","checked":false}]}],"remote_matches":true,"worktree_clean":true}
+}
