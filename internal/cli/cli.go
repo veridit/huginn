@@ -191,6 +191,12 @@ func taskJSON(t task.Task, root string, ts []task.Task) Reply {
 	b, _ := json.Marshal(t)
 	out := Reply{}
 	_ = json.Unmarshal(b, &out)
+	out["goal"] = strings.TrimSpace(t.Goal)
+	acceptance := []any{}
+	for _, item := range t.Acceptance {
+		acceptance = append(acceptance, map[string]any{"text": item.Text, "checked": item.Checked})
+	}
+	out["acceptance"] = acceptance
 	deps := []string{}
 	for _, d := range t.Dependencies {
 		v, e := task.ResolveDependency(ts, d.Ref)
@@ -268,7 +274,21 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		return nil, e
 	}
 	if f.has("help") || cmd == "help" {
-		return Reply{"help": Help, "next": "huginn next"}, nil
+		target := cmd
+		if cmd == "help" {
+			if len(f.args) > 1 {
+				return nil, usage("help expects at most one command", "huginn help")
+			}
+			if len(f.args) == 0 {
+				return Reply{"help": Help, "next": "huginn next"}, nil
+			}
+			target = f.args[0]
+		}
+		if !slices.Contains(Commands, target) {
+			e := task.Invalid("command", target, Commands)
+			return nil, usage("unknown command "+target+"; valid: "+strings.Join(Commands, ", ")+"; closest: "+e.Closest, "huginn help "+e.Closest)
+		}
+		return Reply{"help": commandHelp(target), "next": "huginn next"}, nil
 	}
 	if cmd == "types" {
 		if e = f.count(0); e != nil {
@@ -387,19 +407,7 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		if e = f.count(1); e != nil {
 			return nil, e
 		}
-		user, err := a.identity(ctx)
-		if err != nil {
-			return nil, err
-		}
-		e = s.r.Update(func(_ *gitbranch.Repository) error { var err error; r, err = s.s.Take(f.args[0], user); return err })
-		var raced *gitbranch.ErrRaced
-		if errors.As(e, &raced) {
-			d, err := s.s.Get(f.args[0])
-			if err != nil {
-				return nil, err
-			}
-			return nil, &OperationError{"taken by " + strings.Join(d.Task.Assignee, ", ") + " (" + d.Task.ID + ")", "huginn next"}
-		}
+		r, e = a.take(ctx, s, f.args[0])
 	case "done", "drop":
 		if e = f.count(1); e != nil {
 			return nil, e
@@ -475,6 +483,9 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		c := exec.CommandContext(ctx, editor[0], append(editor[1:], filepath.Join(s.r.Dir, d.Task.Path))...)
 		c.Stdin = a.In
 		c.Stdout = a.Out
+		if f.has("json") {
+			c.Stdout = a.Err
+		}
 		c.Stderr = a.Err
 		if e = c.Run(); e != nil {
 			return nil, e
@@ -568,12 +579,13 @@ func ErrorDetails(err error) (int, string, string) {
 	if fix == "" {
 		fix = "huginn help"
 	}
-	return code, problem, fix
+	problem = strings.ReplaceAll(strings.SplitN(problem, "; fix:", 2)[0], "\r", " ")
+	return code, strings.ReplaceAll(problem, "\n", "; "), fix
 }
 
 func (a *App) Run(ctx context.Context, args []string) int {
 	reply, e := a.Execute(ctx, args)
-	jsonMode := slices.Contains(args, "--json")
+	jsonMode := isJSON(args)
 	if e != nil {
 		code, p, fix := ErrorDetails(e)
 		if jsonMode {
@@ -613,7 +625,7 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		}
 		if ds, ok := t["dependency_details"].([]task.DependencyDetail); ok {
 			for _, d := range ds {
-				fmt.Fprintf(a.Out, "dependency: %+v\n", d)
+				fmt.Fprintf(a.Out, "dependency: %s  %s  [%s]  %s\n", d.ID, d.Title, d.Status, d.Path)
 			}
 		}
 	}

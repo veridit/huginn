@@ -59,6 +59,14 @@ func TestLifecycleJSONContract(t *testing.T) {
 	execute(t, a, "rebalance")
 	r := execute(t, a, "new", "API", "--goal", "API works", "--accept", "First", "--accept", "Second", "--type", "bug")
 	id := r["task"].(Reply)["id"].(string)
+	projection := r["task"].(Reply)
+	if projection["goal"] != "API works" {
+		t.Fatalf("goal contract: %q", projection["goal"])
+	}
+	acceptanceJSON, _ := json.Marshal(projection["acceptance"])
+	if string(acceptanceJSON) != `[{"checked":false,"text":"First"},{"checked":false,"text":"Second"}]` {
+		t.Fatalf("acceptance contract: %s", acceptanceJSON)
+	}
 	dep := execute(t, a, "new", "Form", "--goal", "Form works", "--accept", "UI", "--dep", id)
 	form := dep["task"].(Reply)["id"].(string)
 	expectCode(t, a, 3, "take", form)

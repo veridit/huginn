@@ -10,7 +10,7 @@ else
   (cd "$root" && go build -o "$binary" ./cmd/huginn)
 fi
 python3 - "$binary" <<'PY'
-import json, os, pathlib, subprocess, sys, tempfile
+import json, os, pathlib, pty, select, signal, subprocess, sys, tempfile, time
 binary=str(pathlib.Path(sys.argv[1]).resolve())
 base=pathlib.Path(tempfile.mkdtemp(prefix='huginn-e2e-',dir=os.environ.get('JCODE_SCRATCH_DIR')))
 env=dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=str(base/'no-global'), GIT_AUTHOR_NAME='Test', GIT_COMMITTER_NAME='Test', GIT_AUTHOR_EMAIL='test@example.invalid', GIT_COMMITTER_EMAIL='test@example.invalid', HUGINN_USER='tester', TERM='xterm-256color')
@@ -47,8 +47,25 @@ backlog=base/'backlog';backlog.mkdir();(backlog/'task-1.md').write_text('---\nid
 run('import','backlog',str(backlog));run('import','backlog',str(backlog));assert len(run('ls')['tasks'])==3
 assert run('lint')['findings']==[]
 run('sync');assert git(repo/'.huginn','rev-parse','HEAD')==git(remote,'rev-parse','huginn')
-# TUI transport discovery and explicit JSON alternative. Full PTY assertions live in internal/tui.
+# Run the real TUI in a controlling terminal, then quit after its first render.
 run('tui','--help',json_mode=False);run('tui',code=2)
+pid,fd=pty.fork()
+if pid==0:
+    os.chdir(repo);os.execve(binary,[binary,'tui'],env)
+screen=b'';quit_sent=False;deadline=time.monotonic()+12;status=None
+try:
+    while time.monotonic()<deadline:
+        if select.select([fd],[],[],0.1)[0]:
+            try: screen+=os.read(fd,65536)
+            except OSError: pass
+        if b'Huginn' in screen and not quit_sent:
+            os.write(fd,b'q');quit_sent=True
+        done,value=os.waitpid(pid,os.WNOHANG)
+        if done: status=value;break
+    if status is None:
+        os.kill(pid,signal.SIGKILL);os.waitpid(pid,0)
+    assert status is not None and os.waitstatus_to_exitcode(status)==0 and b'Huginn' in screen,screen[-4000:]
+finally: os.close(fd)
 # Real standard-I/O MCP handshake and one tool request.
 p=subprocess.Popen([binary,'mcp'],cwd=repo,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
 def rpc(method,params,ident=None):

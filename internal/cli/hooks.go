@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"github.com/veridit/huginn/internal/importer"
+	"github.com/veridit/huginn/internal/task"
 	"github.com/veridit/huginn/internal/tui"
 )
 
@@ -34,7 +35,7 @@ func (a *App) runTUI(ctx context.Context, s *session, f flags) (Reply, error) {
 		return nil, usage("tui is interactive; use ls --json for structured output", "huginn ls --json")
 	}
 	user, _ := a.identity(ctx)
-	e := tui.Run(ctx, s.s, tui.Options{User: user, Commit: func(msg string) error { return s.r.Commit(nil, msg) }})
+	e := tui.Run(ctx, s.s, tui.Options{User: user, Take: func(ref string) (task.Result, error) { return a.take(ctx, s, ref) }, Commit: func(msg string) error { return s.r.Commit(nil, msg) }})
 	if e != nil {
 		return nil, e
 	}
