@@ -228,6 +228,10 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 | `move id --before/--after/--top` | rerank, one file |
 | `take id` | pull, set assignee + doing, commit, push (push is the lock) |
 | `done id` | status done; warns on unchecked acceptance |
+| `check id n` | tick acceptance item n (D13) |
+| `note id "text"` | append to Notes (D13) |
+| `set id --priority/--type/--label/--status/--title` | change one field (D13) |
+| `drop id` | status dropped |
 | `next [--type --priority --label --group --mine]` | top unblocked, untaken todo in rank order within the filter (D12) |
 | `types` | the fixed types with one-line descriptions |
 | `lint` | format check |
@@ -258,14 +262,54 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
   high`, still in rank order within that set. `--json` for agents; exit 4
   when nothing matches.
 
-## Build plan (proposed lanes, needs approval before any spawn)
+- **D13 (user 22:36) cheap models must drive it.** Luna, Haiku, Sonnet and
+  DeepSeek Flash must use huginn correctly from the CLI or MCP alone, with
+  no prompt beyond "use huginn". Rules that follow from it (muninn format
+  tests 2026-11-05: cheap models call `help` readily, 24/24, but invent
+  commands when only given a pointer, and mangle anything they must
+  hand-format):
+  1. **Self-guiding output.** `huginn` alone and `huginn help` print a
+     short command list with one example each (under 40 lines). Every
+     command's text output ends with one `next:` line naming the likely
+     follow-up command, filled in with the real id
+     (`next: huginn take k7m2qx`). `--json` carries it as `"next"`.
+  2. **Errors say the fix.** One line of what is wrong, then the exact
+     command that fixes it. Unknown values (status, type, flag) exit 2,
+     list the valid values and the closest match; no silent guessing.
+     A blocked dep (exit 3) names each open dep with its id and title.
+  3. **No hand-formatting needed.** Everything an agent does is one
+     non-interactive command with flat flags: `new "title" --type bug
+     --goal "..." --accept "..." --accept "..." --dep k7m2qx --group auth`,
+     `check <id> <n>` ticks acceptance item n, `note <id> "text"` appends
+     to Notes, `set <id> --priority high --label x`. Editing the file by
+     hand stays allowed; `lint` catches mistakes.
+  4. **Forgiving where it is safe.** Ids, unique id prefixes, slugs and
+     aliases all resolve, case-insensitively. Repeating a finished action
+     is a no-op with exit 0 (`done` on a done task, `take` on your own).
+  5. **Small, flat MCP.** At most ~10 tools, flat string/enum arguments,
+     enums for status and type, one-sentence descriptions, results that
+     carry the same `next` hint.
+  6. **Gate: a cheap-model eval** (`scripts/agent-eval.py`). Scenarios
+     run through `jcode run -m <model> --tools bash` in a throwaway repo
+     with only "use huginn" in the prompt: create two tasks with a dep,
+     find next, take, tick acceptance and finish, reorder, move group,
+     handle a blocked dep. Scored on the final repo state (lint clean,
+     expected fields), not on what the model says. Models: gpt-6-luna,
+     claude-haiku-5-5, claude-sonnet-5-5, deepseek-flash. Bar: every
+     model passes every scenario in at least 2 of 3 runs. Same scenarios
+     again via MCP only.
+- **D14 (foreman 22:40, reversible) the shared git package is public:**
+  `github.com/veridit/huginn/gitbranch` (top-level, not `internal/`), so
+  muninn can import it for its own `muninn` branch.
+
+## Build plan (approved 22:36, lanes started)
 
 Phase 1, two lanes in parallel, disjoint write paths:
 
 | Lane | Writes | Delivers | Gate |
 |---|---|---|---|
 | core | `internal/task`, `internal/id`, `internal/rank`, `internal/cache` | parse/serialise (round-trips unknown keys), `[rank.]id.slug.md` names, id+slug resolver, lexorank, deps by id + cycle check, lint `file:line`, SQLite cache synced from disk (markers in cache, rename = row update) | fuzz: no panic on any bytes; round-trip byte-identical; delete cache -> rebuild equals incremental; move/re-slug/rerank never edits another file |
-| git | `internal/gitbranch` (shared with muninn) | orphan branch + worktree + exclude, sync, `take` lock via push | the two-clone race as a Go test; same package drives a second branch name |
+| git | `gitbranch/` (public, shared with muninn, D14) | orphan branch + worktree + exclude, sync, `take` lock via push | the two-clone race as a Go test; same package drives a second branch name |
 
 Phase 2, three lanes in parallel, after phase 1 lands:
 
@@ -275,5 +319,9 @@ Phase 2, three lanes in parallel, after phase 1 lands:
 | tui | `internal/tui` | list + board, never crashes on bad files | pty test like muninn's |
 | import | `internal/importer` | backlog-md import, idempotent, aliases | the 178 statbus tasks import, re-run is a no-op |
 
-Then: muninn writes `memories/` into the same branch (muninn ROADMAP).
+Phase 3: the cheap-model eval (D13 gate) over the real binary; failures
+go back to the cli+mcp lane as wording/hint fixes until the bar holds.
+
+Then: muninn moves `memories/` onto its own `muninn` branch via `gitbranch`
+(muninn ROADMAP).
 Each lane reports with verbatim test output; the foreman reviews before merge.

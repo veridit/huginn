@@ -1,0 +1,26 @@
+# Build output
+/bin/
+/dist/
+/huginn
+/huginn.exe
+
+# Local data and anything that could hold real memories or credentials.
+# huginn data lives on the huginn branch, never in this tree.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+/data/
+/export/
+*.memories.json
+.env
+.env.*
+*.env
+!testdata/**
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
