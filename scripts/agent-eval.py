@@ -298,7 +298,10 @@ def model_command(model, tier, repo, prompt):
     # unified MCP dispatcher and configured MCP tools, never bash/read/write.
     cmd += (['--tools', 'bash'] if tier == 'cli' else
             ['--disable-base-tools', '--tools', 'mcp', '--mcp-tools', 'eager'])
-    return cmd + ['-C', str(repo), prompt + '\n\nUse the huginn CLI.']
+    # Foreman ruling 22:53: the MCP tier has no shell, so naming the CLI would
+    # mislead; it says only "Use huginn."
+    suffix = 'Use the huginn CLI.' if tier == 'cli' else 'Use huginn.'
+    return cmd + ['-C', str(repo), prompt + '\n\n' + suffix]
 
 
 def job(scenario, model, repeat, tier, args, root):

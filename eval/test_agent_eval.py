@@ -136,7 +136,8 @@ class Harness(unittest.TestCase):
                 self.assertEqual(cmd[:7], ['jcode','run','-m',model,'--quiet','--json','--tools'] if tier == 'cli'
                                  else ['jcode','run','-m',model,'--quiet','--json','--disable-base-tools'])
                 self.assertEqual(cmd[cmd.index('--tools')+1], 'bash' if tier == 'cli' else 'mcp')
-                self.assertEqual(cmd[-1], 'Take my next task.\n\nUse the huginn CLI.')
+                self.assertEqual(cmd[-1], 'Take my next task.\n\n' +
+                                 ('Use the huginn CLI.' if tier == 'cli' else 'Use huginn.'))
                 if tier == 'mcp':
                     self.assertNotIn('bash', cmd)
                     self.assertIn('--disable-base-tools', cmd)
