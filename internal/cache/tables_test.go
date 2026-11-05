@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -45,6 +46,21 @@ func tableState(t testing.TB, c *Cache) map[string][]string {
 		sort.Strings(out[name])
 	}
 	return out
+}
+func TestArbitraryBytesSurviveCacheReopen(t *testing.T) {
+	root := t.TempDir()
+	db := filepath.Join(t.TempDir(), "cache.db")
+	b := []byte(strings.Replace(string(fixture(1)), "A visible result.", "A visible \xff\x80 result.", 1))
+	put(t, root, "A.000001.task.md", b)
+	c := openTest(t, root, db, nil)
+	want, _ := normalized(t, c)
+	c.Close()
+	c = openTest(t, root, db, nil)
+	defer c.Close()
+	got, _ := normalized(t, c)
+	if !reflect.DeepEqual(want, got) {
+		t.Fatal("semantic arbitrary-byte cache roundtrip changed", want, got)
+	}
 }
 func TestRenameRowsAndEdges(t *testing.T) {
 	root := t.TempDir()

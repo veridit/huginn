@@ -150,7 +150,9 @@ func Parse(path string, data []byte) *Document {
 	if e != nil {
 		d.add(1, e.Error())
 	}
-	clean := func(s string) string { return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r") }
+	clean := func(s string) string {
+		return strings.ToValidUTF8(strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r"), "\ufffd")
+	}
 	if len(d.lines) > 0 && clean(d.lines[0]) == "---" {
 		for n := 1; n < len(d.lines); n++ {
 			line := clean(d.lines[n])
@@ -261,6 +263,7 @@ func Parse(path string, data []byte) *Document {
 			}
 		}
 	}
+	d.Task.Goal = strings.ToValidUTF8(d.Task.Goal, "\ufffd")
 	return d
 }
 func (d *Document) add(line int, p string) {
