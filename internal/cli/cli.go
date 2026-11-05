@@ -572,6 +572,17 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		return nil, usage("command requires its dedicated transport", "huginn help")
 	}
 	if e != nil {
+		var detail *task.Error
+		if errors.As(e, &detail) && strings.Contains(detail.Fix, "<id>") {
+			if cmd == "new" {
+				detail.Fix = "huginn help new"
+			} else if len(f.args) > 0 {
+				if d, err := s.s.Get(f.args[0]); err == nil {
+					detail.ID = d.Task.ID
+					detail.Fix = strings.ReplaceAll(detail.Fix, "<id>", d.Task.ID)
+				}
+			}
+		}
 		return nil, e
 	}
 	if cmd != "next" && cmd != "take" {

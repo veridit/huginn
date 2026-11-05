@@ -163,6 +163,11 @@ func TestRejectedSetIsUnchanged(t *testing.T) {
 	id := r["task"].(Reply)["id"].(string)
 	expectCode(t, a, 2, "set", id, "--status", "doing", "--title", "")
 	expectCode(t, a, 2, "set", id, "--type", "bugs")
+	_, groupError := a.Execute(context.Background(), []string{"mv", "keep-title", "../bad"})
+	_, _, groupFix := ErrorDetails(groupError)
+	if groupFix != "huginn mv "+id+" auth" {
+		t.Fatal(groupFix)
+	}
 	r = execute(t, a, "show", id)
 	if r["task"].(Reply)["title"] != "Keep title" || r["task"].(Reply)["status"] != "todo" {
 		t.Fatal(r)
