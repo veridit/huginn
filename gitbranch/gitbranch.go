@@ -5,10 +5,13 @@
 package gitbranch
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -54,6 +57,9 @@ func (e *ErrRaced) Error() string {
 	return "update lost push race; remote state restored at " + e.RemoteHead + "\nfix: " + e.Fix
 }
 func quote(s string) string {
+	if runtime.GOOS == "windows" {
+		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+	}
 	return "\"" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "\"", "\\\"") + "\""
 }
 func (r *Repository) fix(args string) string { return "git -C " + quote(r.Dir) + " " + args }
@@ -66,9 +72,15 @@ func (r *Repository) runAt(dir string, args ...string) (string, error) {
 	if r.Identity.Email != "" {
 		c.Env = append(c.Env, "GIT_AUTHOR_EMAIL="+r.Identity.Email, "GIT_COMMITTER_EMAIL="+r.Identity.Email)
 	}
-	b, err := c.CombinedOutput()
+	var stderr bytes.Buffer
+	c.Stderr = &stderr
+	b, err := c.Output()
 	if err != nil {
-		return string(b), &Error{Op: strings.Join(args, " "), Detail: strings.TrimSpace(string(b)), Fix: r.fix(strings.Join(args, " ")), Cause: err}
+		quoted := make([]string, len(args))
+		for i, a := range args {
+			quoted[i] = quote(a)
+		}
+		return string(b), &Error{Op: strings.Join(args, " "), Detail: strings.TrimSpace(string(b) + stderr.String() + " " + err.Error()), Fix: "git -C " + quote(dir) + " " + strings.Join(quoted, " "), Cause: err}
 	}
 	return strings.TrimSuffix(string(b), "\n"), nil
 }
@@ -91,7 +103,14 @@ func Init(repoRoot, branch, dir string, options ...Option) (*Repository, error) 
 	var major, minor int
 	fmt.Sscanf(version, "git version %d.%d", &major, &minor)
 	if major < 2 || major == 2 && minor < 42 {
-		return nil, &Error{Op: "init", Detail: "Git >= 2.42 required for worktree add --orphan; found " + version, Fix: "Install Git >= 2.42, then run git --version"}
+		fix := "sudo apt-get update && sudo apt-get install git && git --version"
+		if runtime.GOOS == "darwin" {
+			fix = "brew install git && git --version"
+		}
+		if runtime.GOOS == "windows" {
+			fix = "winget upgrade --id Git.Git --exact"
+		}
+		return nil, &Error{Op: "init", Detail: "Git >= 2.42 required for worktree add --orphan; found " + version, Fix: fix}
 	}
 	root, err := r.runAt(repoRoot, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -101,6 +120,23 @@ func Init(repoRoot, branch, dir string, options ...Option) (*Repository, error) 
 	clean := filepath.Clean(dir)
 	if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return nil, &Error{Op: "init", Detail: "worktree directory must be inside checkout", Fix: "Choose a relative directory such as .notes"}
+	}
+	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
+		if strings.EqualFold(part, ".git") || strings.ContainsAny(part, "\r\n") {
+			return nil, &Error{Op: "init", Detail: "unsafe worktree directory", Fix: "git -C " + quote(root) + " worktree list"}
+		}
+	}
+	// Reject symlink components rather than creating a worktree outside the host.
+	ancestor := root
+	for _, part := range strings.Split(filepath.ToSlash(clean), "/") {
+		ancestor = filepath.Join(ancestor, part)
+		info, e := os.Lstat(ancestor)
+		if e != nil && !os.IsNotExist(e) {
+			return nil, r.ioerr(e)
+		}
+		if e == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, &Error{Op: "init", Detail: "worktree directory traverses symlink: " + ancestor, Fix: "git -C " + quote(root) + " worktree list"}
+		}
 	}
 	if _, err = r.runAt(root, "check-ref-format", "--branch", branch); err != nil {
 		return nil, err
@@ -131,10 +167,10 @@ func Init(repoRoot, branch, dir string, options ...Option) (*Repository, error) 
 	if err != nil && !os.IsNotExist(err) {
 		return nil, r.ioerr(err)
 	}
-	entry := "/" + filepath.ToSlash(clean) + "/"
+	entry := "/" + strings.NewReplacer("\\", "\\\\", "*", "\\*", "?", "\\?", "[", "\\[", " ", "\\ ").Replace(filepath.ToSlash(clean)) + "/"
 	found := false
 	for _, line := range strings.Split(string(b), "\n") {
-		if line == entry {
+		if strings.TrimSuffix(line, "\r") == entry {
 			found = true
 		}
 	}
@@ -203,8 +239,8 @@ func (r *Repository) ioerr(e error) error {
 func (r *Repository) Head() (string, error) {
 	h, e := r.git("rev-parse", "--verify", "HEAD")
 	if e != nil {
-		if _, s := os.Stat(filepath.Join(r.Dir, ".git")); s == nil {
-			if _, x := r.git("show-ref", "--verify", "refs/heads/"+r.Branch); x != nil {
+		if _, x := r.git("symbolic-ref", "HEAD"); x == nil {
+			if _, x = r.git("show-ref", "--verify", "--quiet", "refs/heads/"+r.Branch); exitCode(x) == 1 {
 				return "", nil
 			}
 		}
@@ -216,10 +252,31 @@ func (r *Repository) Head() (string, error) {
 type Change struct{ Status, OldPath, Path string }
 
 func (r *Repository) DiffNameStatus(old, new string) ([]Change, error) {
-	args := []string{"diff", "--name-status", "-z", "--find-renames", old, new, "--"}
-	if old == "" {
-		args = []string{"diff-tree", "--root", "--no-commit-id", "-r", "--name-status", "-z", "--find-renames", new, "--"}
+	if old == "" && new == "" {
+		return nil, nil
 	}
+	newTree, e := r.git("rev-parse", "--verify", "--end-of-options", new+"^{tree}")
+	if e != nil {
+		return nil, e
+	}
+	if old == "" {
+		out, e := r.git("ls-tree", "-r", "--name-only", "-z", newTree)
+		if e != nil {
+			return nil, e
+		}
+		var changes []Change
+		for _, path := range strings.Split(strings.TrimSuffix(out, "\x00"), "\x00") {
+			if path != "" {
+				changes = append(changes, Change{Status: "A", Path: path})
+			}
+		}
+		return changes, nil
+	}
+	oldTree, e := r.git("rev-parse", "--verify", "--end-of-options", old+"^{tree}")
+	if e != nil {
+		return nil, e
+	}
+	args := []string{"diff", "--name-status", "-z", "--find-renames", oldTree, newTree, "--"}
 	out, e := r.git(args...)
 	if e != nil {
 		return nil, e
@@ -261,7 +318,7 @@ func (r *Repository) Commit(paths []string, message string) error {
 	if len(paths) == 0 {
 		paths = []string{"."}
 	}
-	args := append([]string{"add", "--all", "--"}, paths...)
+	args := append([]string{"--literal-pathspecs", "add", "--all", "--"}, paths...)
 	if _, e = r.git(args...); e != nil {
 		return e
 	}
@@ -373,7 +430,7 @@ func (r *Repository) Update(fn func(*Repository) error) error {
 		return pushErr
 	}
 	// Distinguish a real non-fast-forward from authentication/hooks/network errors.
-	if _, e = r.git("merge-base", "--is-ancestor", r.remoteRef(), "HEAD"); e == nil {
+	if _, e = r.git("merge-base", "--is-ancestor", r.remoteRef(), "HEAD"); exitCode(e) != 1 {
 		return pushErr
 	}
 	if _, e = r.git("reset", "--hard", r.remoteRef()); e != nil {
@@ -384,4 +441,15 @@ func (r *Repository) Update(fn func(*Repository) error) error {
 		return e
 	}
 	return &ErrRaced{RemoteHead: h, Dir: r.Dir, Fix: r.fix("show HEAD")}
+}
+
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var e *exec.ExitError
+	if errors.As(err, &e) {
+		return e.ExitCode()
+	}
+	return -1
 }
