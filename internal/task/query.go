@@ -27,6 +27,7 @@ type Error struct {
 	Matches      []Match     `json:"matches,omitempty"`
 	Dependencies []Task      `json:"dependencies,omitempty"`
 	Unchecked    []Unchecked `json:"unchecked,omitempty"`
+	Cycle        []string    `json:"cycle,omitempty"`
 }
 
 func (e *Error) Error() string {
