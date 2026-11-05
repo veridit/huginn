@@ -34,6 +34,26 @@ func TestMoveRepairsTiesAndUsesGlobalOrder(t *testing.T) {
 	}
 }
 
+func TestCombinedFiltersAndExternalRefresh(t *testing.T) {
+	m := fixture(t)
+	m = press(m, "s", "todo", "enter", "y", "bug", "enter", "g", "auth", "enter", "l", "urgent", "enter", "/", "Alpha", "enter")
+	if len(m.visible) != 1 {
+		t.Fatal(m.View())
+	}
+	id := m.visible[0].ID
+	if _, err := m.store.Drop(id); err != nil {
+		t.Fatal(err)
+	}
+	m = press(m, "r")
+	if len(m.visible) != 0 {
+		t.Fatal("external status edit not reflected", m.View())
+	}
+	m = press(m, "c")
+	if len(m.visible) != 2 {
+		t.Fatal(m.View())
+	}
+}
+
 func TestAcceptanceSelectionClampedAcrossTasks(t *testing.T) {
 	m := fixture(t)
 	m = press(m, "enter", "j", "esc", "j", " ")

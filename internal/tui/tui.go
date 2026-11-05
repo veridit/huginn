@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -306,7 +307,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "e":
 			if ok {
-				d, e := m.store.Get(t.ID)
+				path, e := m.editorPath(t)
 				if e != nil {
 					m.message = e.Error()
 					break
@@ -320,7 +321,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = "$EDITOR is empty"
 					break
 				}
-				cmd := exec.Command(args[0], append(args[1:], filepath.Join(m.store.Root, d.Task.Path))...)
+				cmd := exec.Command(args[0], append(args[1:], path)...)
 				return m, tea.ExecProcess(cmd, func(e error) tea.Msg { return editorMsg{e} })
 			}
 		}
@@ -329,12 +330,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// editorPath deliberately uses the selected path, not the possibly broken id.
+// A malformed task must remain repairable, but cannot escape the task tree.
+func (m model) editorPath(t task.Task) (string, error) {
+	if t.Path == "" || filepath.IsAbs(t.Path) {
+		return "", fmt.Errorf("invalid task path")
+	}
+	root, err := filepath.EvalSymlinks(m.store.Root)
+	if err != nil {
+		return "", err
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(root, t.Path)
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("task path escapes store")
+	}
+	actual, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	if actual != path {
+		return "", fmt.Errorf("symlinked task paths cannot be edited")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("task is not a regular file")
+	}
+	return path, nil
+}
+
 var dim = lipgloss.NewStyle().Faint(true)
 var heading = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 
 func safe(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 32 && r != '\n' && r != '\t' || r == 127 {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
 			return -1
 		}
 		return r

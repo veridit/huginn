@@ -23,7 +23,7 @@ ARTIFACTS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 if ARTIFACTS:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
-with tempfile.TemporaryDirectory(prefix="huginn-tui-") as tmp:
+with tempfile.TemporaryDirectory(prefix="huginn-tui-", dir=os.environ.get("JCODE_SCRATCH_DIR")) as tmp:
     root = Path(tmp)
     binary = root / "driver"
     store = root / "tasks"
