@@ -48,6 +48,14 @@ func New(e Executor) *sdk.Server {
 					err = &cli.UsageError{Problem: "invalid tool arguments: " + e.Error(), Fix: "huginn help"}
 				}
 			}
+			// Flat-tool bridges may materialize omitted optional properties as null.
+			// Null means absent, never an instruction to clear a field.
+			for key, value := range input {
+				_, known := props[key]
+				if known && value == nil && !slices.Contains(required, key) {
+					delete(input, key)
+				}
+			}
 			if err == nil {
 				err = validate(input, props, required)
 			}
@@ -103,14 +111,14 @@ func New(e Executor) *sdk.Server {
 	add("new", "Create a task with a goal, acceptance checks and optional dependency references.", map[string]any{"title": str("Task title"), "goal": str("Desired outcome"), "accept": array("Observable acceptance checks"), "dep": array("Dependency ids, slugs or aliases"), "type": enum("feature", "bug", "chore", "spike", "docs"), "priority": str("Priority label"), "label": array("Labels"), "group": str("Folder"), "top": map[string]any{"type": "boolean"}, "after": str("Task to follow")}, []string{"title", "goal", "accept"}, func(m map[string]any) ([]string, error) {
 		return flags([]string{"new", get(m, "title")}, m, "goal", "accept", "dep", "type", "priority", "label", "group", "top", "after"), nil
 	})
-	add("update", "Change fields (default action set), dependencies (dep), checks, notes, rank, folder (move_group), or drop a task.", map[string]any{"id": str("Task reference"), "action": enum("set", "check", "note", "move", "move_group", "mv", "dep", "drop", "rebalance"), "status": enum("todo", "doing", "done", "dropped"), "type": enum("feature", "bug", "chore", "spike", "docs"), "priority": str("Priority label"), "title": str("New title"), "label": str("Label"), "assignee": str("Assignee"), "item": map[string]any{"type": "integer", "minimum": 1}, "text": str("Note text"), "add_deps": array("Dependency references to add, idempotently; use action dep"), "remove_deps": array("Dependency references to remove; use action dep"), "group": str("Destination folder, requires action move_group and preserves rank and contents"), "before": str("Insert before task"), "after": str("Insert after task"), "top": map[string]any{"type": "boolean"}}, []string{"id"}, func(m map[string]any) ([]string, error) {
+	add("update", "Change fields (set), dependencies (dep), checks, notes, rank (move), folder (move_group), or drop, using only the selected action's fields.", map[string]any{"id": str("Task reference"), "action": enum("set", "check", "note", "move", "move_group", "mv", "dep", "drop", "rebalance"), "status": enum("todo", "doing", "done", "dropped"), "type": enum("feature", "bug", "chore", "spike", "docs"), "priority": str("Priority label"), "title": str("New title"), "label": str("Label"), "assignee": str("Assignee"), "item": map[string]any{"type": "integer", "minimum": 1}, "text": str("Note text"), "add_deps": array("Dependency references to add, idempotently; use action dep"), "remove_deps": array("Dependency references to remove; use action dep"), "group": str("Destination folder, requires action move_group and preserves rank and contents"), "before": str("Insert before task"), "after": str("Insert after task"), "top": map[string]any{"type": "boolean"}}, []string{"id"}, func(m map[string]any) ([]string, error) {
 		action, id := get(m, "action"), get(m, "id")
 		if action == "" {
 			action = "set"
-			if _, ok := m["add_deps"]; ok {
+			if deps, _ := m["add_deps"].([]any); len(deps) > 0 {
 				action = "dep"
 			}
-			if _, ok := m["remove_deps"]; ok {
+			if deps, _ := m["remove_deps"].([]any); len(deps) > 0 {
 				action = "dep"
 			}
 		}
@@ -118,9 +126,28 @@ func New(e Executor) *sdk.Server {
 		permitted := strings.Fields(allowed[action] + " id action")
 		for key := range m {
 			if !slices.Contains(permitted, key) {
+				// The selected action owns its fields. Flat model bridges often
+				// populate unrelated enum and item defaults as well as empty values.
+				// Never apply them, but still reject meaningful mixed operations.
+				value := m[key]
+				empty := value == "" || value == false
+				if values, ok := value.([]any); ok {
+					empty = len(values) == 0
+				}
+				if empty || (action != "set" && (key == "status" || key == "type" || key == "item")) {
+					delete(m, key)
+					continue
+				}
 				fix := "huginn help"
 				if key == "group" {
 					fix = "huginn mv " + id + " " + get(m, "group")
+				}
+				if key == "before" || key == "after" || key == "top" {
+					fix = "huginn move " + id + " --" + key
+					if key != "top" {
+						fix += " " + get(m, key)
+					}
+					return nil, &cli.UsageError{Problem: "argument " + key + " reorders rank and requires action move, not " + action, Fix: fix}
 				}
 				return nil, &cli.UsageError{Problem: "argument " + key + " does not apply to action " + action + "; use move_group for folders or dep for dependencies", Fix: fix}
 			}
@@ -154,6 +181,11 @@ func New(e Executor) *sdk.Server {
 		case "move":
 			if _, ok := m["group"]; ok {
 				return nil, &cli.UsageError{Problem: "action move reorders rank; to change folder use action move_group with group", Fix: "huginn mv " + id + " " + get(m, "group")}
+			}
+			for _, key := range []string{"before", "after"} {
+				if get(m, key) == "" {
+					delete(m, key)
+				}
 			}
 			args = flags(args, m, "before", "after", "top")
 		}

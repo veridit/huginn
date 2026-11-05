@@ -87,6 +87,35 @@ func TestToolsSchemasAndRoundTrip(t *testing.T) {
 	if !out.IsError || !reflect.DeepEqual(r.args, previous) {
 		t.Fatal("folder movement must never accidentally rerank", r.args)
 	}
+	for _, tc := range []struct {
+		action string
+		fields map[string]any
+		want   []string
+	}{
+		{"check", map[string]any{"item": 1}, []string{"check", "abc123", "1"}},
+		{"note", map[string]any{"text": "Blocked by API"}, []string{"note", "abc123", "Blocked by API"}},
+		{"move", map[string]any{"top": true}, []string{"move", "abc123", "--top"}},
+		{"move_group", map[string]any{"group": "auth"}, []string{"mv", "abc123", "auth"}},
+		{"drop", nil, []string{"drop", "abc123"}},
+	} {
+		input := map[string]any{"id": "abc123", "action": tc.action, "status": "doing", "type": "chore", "item": 1, "title": "", "text": "", "assignee": "", "label": "", "priority": "", "before": "", "after": "", "group": "", "top": false, "add_deps": []any{}, "remove_deps": nil}
+		for key, value := range tc.fields {
+			input[key] = value
+		}
+		out = call("update", input)
+		if out.IsError || !reflect.DeepEqual(r.args, tc.want) {
+			t.Fatalf("bridge action %s: error=%v args=%v", tc.action, out, r.args)
+		}
+	}
+	previous = append([]string(nil), r.args...)
+	out = call("update", map[string]any{"id": "abc123", "action": "move_group", "group": "auth", "top": true})
+	if !out.IsError || !reflect.DeepEqual(r.args, previous) {
+		t.Fatal("meaningful mixed movement must remain rejected", r.args)
+	}
+	out = call("update", map[string]any{"id": "abc123", "action": "check", "item": nil})
+	if !out.IsError {
+		t.Fatal("null cannot supply required action item")
+	}
 	call("update", map[string]any{"id": "abc123", "add_deps": []string{"def456"}, "remove_deps": []string{"old789"}})
 	if !reflect.DeepEqual(r.args, []string{"dep", "abc123", "--add", "def456", "--remove", "old789"}) {
 		t.Fatal(r.args)
