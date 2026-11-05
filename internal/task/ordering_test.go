@@ -180,7 +180,9 @@ func assertReportedWindow(t *testing.T, s *Store, before map[string][32]byte, re
 	}
 }
 func TestAutomaticMinimalWindow(t *testing.T) {
-	for _, tc := range []struct{ a, b string }{{"A", "A0"}, {"A", "A"}, {"000000000000", "0000000000000"}, {"!", "?"}} {
+	// '@' keeps the non-alphabet boundary coverage without using '?' in an
+	// actual filename, which Windows forbids. rank tests cover '?' in memory.
+	for _, tc := range []struct{ a, b string }{{"A", "A0"}, {"A", "A"}, {"000000000000", "0000000000000"}, {"!", "@"}} {
 		t.Run(tc.a+"_"+tc.b, func(t *testing.T) {
 			s := &Store{Root: t.TempDir()}
 			seedRank(t, s.Root, "0", "000001")
