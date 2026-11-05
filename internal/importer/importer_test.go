@@ -245,6 +245,27 @@ func TestUnsafePaths(t *testing.T) {
 	}
 }
 
+func TestMetadataDoesNotClobberUnknownFields(t *testing.T) {
+	raw := strings.Replace(fixture, "status: To Do", "status: Waiting\naliases: [LEGACY-7]\ntype: enhancement\nimport_type_inference: 'source custom' # untouched\nbacklog_type: 'source original'\ncreated: 'keep local date'\ncreated_date: '2026-01-02'", 1)
+	fields, _, err := front([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	converted, err := convert(source{raw: []byte(raw), fields: fields, alias: "DEMO-001", title: "Synthetic"}, "000001", map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"import_type_inference: 'source custom' # untouched", "backlog_type: 'source original'", "created: 'keep local date'", `backlog_type_2: "enhancement"`, `import_type_inference_2: "label: bug"`} {
+		if !bytes.Contains(converted, []byte(want)) {
+			t.Fatalf("missing preserved field %q", want)
+		}
+	}
+	d := task.Parse("000001.synthetic.md", converted)
+	if d.Task.Status != "Waiting" || len(d.Task.Aliases) != 2 {
+		t.Fatal(d.Task)
+	}
+}
+
 // Real task content is only read into a test-time copy outside the repository.
 func TestRealStatbus(t *testing.T) {
 	home, e := os.UserHomeDir()

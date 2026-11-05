@@ -18,7 +18,8 @@ is checked between files. A partially completed import can safely be retried.
   Crockford characters. Occupied ids are checked, and collisions retry the next
   attempt. Allocation is ordered by source ordinal, then source id. Existing
   aliases and persisted import baselines take precedence over generated ids.
-* Source id becomes `aliases: [SOURCE-ID]`. The canonical id is both in the
+* Source id becomes the first alias, followed by any pre-existing source aliases.
+  The canonical id is both in the
   filename and the frontmatter. A title-derived six-word slug is generated only
   on first import. Existing paths, groups, slugs and ranks are never renamed.
 * Exact statuses `To Do`, `In Progress`, `Done` become `todo`, `doing`, `done`.
@@ -41,9 +42,12 @@ is checked between files. A partially completed import can safely be retried.
 * Only an exact case-insensitive `bug`, `docs`, `chore`, or `spike` label implies
   type. First matching label wins when several are present. Otherwise type is
   feature. `import_type_inference` records the chosen label or default reason.
-  An original source type is retained separately as `backlog_type`.
+  An original source type is retained separately as `backlog_type`. If either
+  metadata key already exists upstream, a `_2`, `_3`, ... suffix avoids
+  overwriting that original field.
 * `created_date`/`updated_date` remain untouched and are additionally copied to
-  `created`/`updated`. No wall-clock timestamp is added. All other frontmatter
+  `created`/`updated` when those destination-format fields are absent upstream.
+  No wall-clock timestamp is added. All other frontmatter
   spans are preserved, including multiline values, nested unknown keys and
   comments. Known transformed fields use the core task editor.
 

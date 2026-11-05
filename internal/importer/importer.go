@@ -271,6 +271,18 @@ func Run(ctx context.Context, src string, dst *task.Store, opts Options) (Report
 			}
 		}
 	}
+	for _, s := range sources {
+		for _, alias := range list(s.fields["aliases"]) {
+			a := canonical(alias)
+			if a == "" {
+				continue
+			}
+			if old := ids[a]; old != "" && old != ids[s.alias] {
+				return report, fmt.Errorf("ambiguous source alias %s", a)
+			}
+			ids[a] = ids[s.alias]
+		}
+	}
 	for i, s := range sources {
 		if err := ctx.Err(); err != nil {
 			return report, err
@@ -448,18 +460,34 @@ func convert(s source, id string, ids map[string]string) ([]byte, error) {
 		}
 	}
 	// The old type remains available even when it is not a Huginn enum.
+	metadataKey := func(want string) string {
+		key := want
+		for n := 2; ; n++ {
+			if _, exists := s.fields[key]; !exists {
+				return key
+			}
+			key = fmt.Sprintf("%s_%d", want, n)
+		}
+	}
+	aliases := []string{s.alias}
+	for _, a := range list(s.fields["aliases"]) {
+		if canonical(a) != s.alias {
+			aliases = append(aliases, a)
+		}
+	}
 	updates := []struct {
 		k string
 		v any
-	}{{"id", id}, {"aliases", []string{s.alias}}, {"status", status}, {"type", typ}, {"import_type_inference", reason}}
+	}{{"id", id}, {"aliases", aliases}, {"status", status}, {"type", typ}, {metadataKey("import_type_inference"), reason}}
 	if value, ok := s.fields["type"]; ok {
 		updates = append(updates, struct {
 			k string
 			v any
-		}{"backlog_type", value})
+		}{metadataKey("backlog_type"), value})
 	}
 	for _, pair := range [][2]string{{"created_date", "created"}, {"updated_date", "updated"}} {
-		if v, ok := s.fields[pair[0]]; ok {
+		_, alreadyPresent := s.fields[pair[1]]
+		if v, ok := s.fields[pair[0]]; ok && !alreadyPresent {
 			updates = append(updates, struct {
 				k string
 				v any
