@@ -177,6 +177,35 @@ func TestRejectedSetIsUnchanged(t *testing.T) {
 	}
 }
 
+func TestDependencyRecoveryAndCycle(t *testing.T) {
+	a := app(t)
+	first := execute(t, a, "new", "API", "--goal", "G", "--accept", "C")["task"].(Reply)["id"].(string)
+	second := execute(t, a, "new", "Form", "--goal", "G", "--accept", "C")["task"].(Reply)["id"].(string)
+	execute(t, a, "dep", second, "--add", "api")
+	repeated := execute(t, a, "dep", second, "--add", first)
+	if repeated["changed"] != false {
+		t.Fatal(repeated)
+	}
+	expectCode(t, a, 3, "dep", first, "--add", second)
+	_, cycleError := a.Execute(context.Background(), []string{"dep", first, "--add", second})
+	_, problem, fix := ErrorDetails(cycleError)
+	if !strings.Contains(problem, "dependency cycle:") || !strings.Contains(fix, " --remove ") {
+		t.Fatal(problem, fix)
+	}
+	expectCode(t, a, 2, "dep", second, "--remove", first, "--add", "missing-task")
+	r := execute(t, a, "show", second)
+	deps := r["task"].(Reply)["dependencies"].([]string)
+	if len(deps) != 1 || deps[0] != first {
+		t.Fatal(r)
+	}
+	if dirty := git(t, filepath.Join(a.Cwd, ".huginn"), "status", "--porcelain"); dirty != "" {
+		t.Fatal(dirty)
+	}
+	execute(t, a, "dep", second, "--remove", first)
+	execute(t, a, "dep", second, "--remove", first)
+	expectCode(t, a, 2, "move", second)
+}
+
 func TestJSONErrors(t *testing.T) {
 	a := app(t)
 	if code := a.Run(context.Background(), []string{"ls", "--status", "don", "--json"}); code != 2 {

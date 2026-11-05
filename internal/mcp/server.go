@@ -42,7 +42,12 @@ func New(e Executor) *sdk.Server {
 			mu.Lock()
 			defer mu.Unlock()
 			input := map[string]any{}
-			err := json.Unmarshal(req.Params.Arguments, &input)
+			var err error
+			if len(req.Params.Arguments) > 0 {
+				if e := json.Unmarshal(req.Params.Arguments, &input); e != nil {
+					err = &cli.UsageError{Problem: "invalid tool arguments: " + e.Error(), Fix: "huginn help"}
+				}
+			}
 			if err == nil {
 				err = validate(input, props, required)
 			}
@@ -98,8 +103,28 @@ func New(e Executor) *sdk.Server {
 	add("new", "Create a task with a goal, acceptance checks and optional dependency references.", map[string]any{"title": str("Task title"), "goal": str("Desired outcome"), "accept": array("Observable acceptance checks"), "dep": array("Dependency ids, slugs or aliases"), "type": enum("feature", "bug", "chore", "spike", "docs"), "priority": str("Priority label"), "label": array("Labels"), "group": str("Folder"), "top": map[string]any{"type": "boolean"}, "after": str("Task to follow")}, []string{"title", "goal", "accept"}, func(m map[string]any) ([]string, error) {
 		return flags([]string{"new", get(m, "title")}, m, "goal", "accept", "dep", "type", "priority", "label", "group", "top", "after"), nil
 	})
-	add("update", "Change fields, check acceptance, append a note, reorder, move group, or drop a task.", map[string]any{"id": str("Task reference"), "action": enum("set", "check", "note", "move", "mv", "drop", "rebalance"), "status": enum("todo", "doing", "done", "dropped"), "type": enum("feature", "bug", "chore", "spike", "docs"), "priority": str("Priority label"), "title": str("New title"), "label": str("Label"), "assignee": str("Assignee"), "item": map[string]any{"type": "integer", "minimum": 1}, "text": str("Note text"), "group": str("Destination folder"), "before": str("Insert before task"), "after": str("Insert after task"), "top": map[string]any{"type": "boolean"}}, []string{"id", "action"}, func(m map[string]any) ([]string, error) {
+	add("update", "Change fields (default action set), dependencies (dep), checks, notes, rank, folder (move_group), or drop a task.", map[string]any{"id": str("Task reference"), "action": enum("set", "check", "note", "move", "move_group", "mv", "dep", "drop", "rebalance"), "status": enum("todo", "doing", "done", "dropped"), "type": enum("feature", "bug", "chore", "spike", "docs"), "priority": str("Priority label"), "title": str("New title"), "label": str("Label"), "assignee": str("Assignee"), "item": map[string]any{"type": "integer", "minimum": 1}, "text": str("Note text"), "add_deps": array("Dependency references to add, idempotently; use action dep"), "remove_deps": array("Dependency references to remove; use action dep"), "group": str("Destination folder, requires action move_group and preserves rank and contents"), "before": str("Insert before task"), "after": str("Insert after task"), "top": map[string]any{"type": "boolean"}}, []string{"id"}, func(m map[string]any) ([]string, error) {
 		action, id := get(m, "action"), get(m, "id")
+		if action == "" {
+			action = "set"
+			if _, ok := m["add_deps"]; ok {
+				action = "dep"
+			}
+			if _, ok := m["remove_deps"]; ok {
+				action = "dep"
+			}
+		}
+		allowed := map[string]string{"set": "status type priority title label assignee", "check": "item", "note": "text", "move": "before after top", "move_group": "group", "mv": "group", "dep": "add_deps remove_deps", "drop": "", "rebalance": ""}
+		permitted := strings.Fields(allowed[action] + " id action")
+		for key := range m {
+			if !slices.Contains(permitted, key) {
+				fix := "huginn help"
+				if key == "group" {
+					fix = "huginn mv " + id + " " + get(m, "group")
+				}
+				return nil, &cli.UsageError{Problem: "argument " + key + " does not apply to action " + action + "; use move_group for folders or dep for dependencies", Fix: fix}
+			}
+		}
 		args := []string{action, id}
 		switch action {
 		case "set":
@@ -112,9 +137,24 @@ func New(e Executor) *sdk.Server {
 			args = append(args, strconv.Itoa(int(n)))
 		case "note":
 			args = append(args, get(m, "text"))
-		case "mv":
-			args = append(args, get(m, "group"))
+		case "mv", "move_group":
+			if _, ok := m["group"]; !ok {
+				return nil, &cli.UsageError{Problem: "move_group needs group", Fix: "huginn show " + id}
+			}
+			args = []string{"mv", id, get(m, "group")}
+		case "dep":
+			args = []string{"dep", id}
+			for _, pair := range [][2]string{{"add_deps", "add"}, {"remove_deps", "remove"}} {
+				if values, ok := m[pair[0]].([]any); ok {
+					for _, v := range values {
+						args = append(args, "--"+pair[1], v.(string))
+					}
+				}
+			}
 		case "move":
+			if _, ok := m["group"]; ok {
+				return nil, &cli.UsageError{Problem: "action move reorders rank; to change folder use action move_group with group", Fix: "huginn mv " + id + " " + get(m, "group")}
+			}
 			args = flags(args, m, "before", "after", "top")
 		}
 		return args, nil

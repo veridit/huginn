@@ -32,6 +32,11 @@ run('types');run('init');run('init');run('next',code=4);run('nex',code=2);run('n
 a=run('new','API','--goal','API ready','--accept','First','--accept','Second','--type','bug','--priority','high','--label','api')['task']['id']
 b=run('new','Form','--goal','Form ready','--accept','UI works','--dep',a)['task']['id']
 assert run('show',b)['task']['dependencies']==[a]
+run('dep',b,'--add',a);run('dep',b,'--remove',a);run('dep',b,'--remove',a);run('dep',b,'--add','api');run('dep',a,'--add',b,code=3)
+assert run('show',b)['task']['dependencies']==[a]
+run('dep',b,'--remove',a,'--add','missing-task',code=2)
+assert run('show',b)['task']['dependencies']==[a]
+run('move',b,code=2)
 run('take',b,code=3);run('done',a,code=3);run('done',a,code=3,json_mode=False)
 assert run('next','--type','bug','--priority','high','--label','api')['task']['id']==a
 run('take',a);run('take',a);assert run('next','--mine')['task']['id']==a
@@ -82,6 +87,16 @@ try:
     rpc('notifications/initialized',{})
     tools=rpc('tools/list',{},2)['result']['tools'];assert len(tools)==10
     result=rpc('tools/call',{'name':'list','arguments':{}},3)['result'];assert not result.get('isError');assert 'next' in json.loads(result['content'][0]['text'])
+    before_group=run('show',b)['task']
+    result=rpc('tools/call',{'name':'update','arguments':{'id':b,'action':'move_group','group':'board'}},4)['result'];assert not result.get('isError'),result
+    after_group=run('show',b)['task'];assert after_group['group']=='board' and after_group['rank']==before_group['rank']
+    result=rpc('tools/call',{'name':'update','arguments':{'id':b,'remove_deps':[a]}},5)['result'];assert not result.get('isError'),result
+    assert run('show',b)['task']['dependencies']==[]
+    result=rpc('tools/call',{'name':'update','arguments':{'id':b,'add_deps':[a]}},6)['result'];assert not result.get('isError'),result
+    assert run('show',b)['task']['dependencies']==[a]
+    result=rpc('tools/call',{'name':'lint'},7)['result'];assert not result.get('isError'),result
+    result=rpc('tools/call',{'name':'update','arguments':{'id':b,'action':'move','group':'oops'}},8)['result'];assert result.get('isError'),result
+    assert run('show',b)['task']['rank']==before_group['rank']
 finally:
     p.stdin.close();p.wait(timeout=10)
 # Two concurrent takes start from the same remote HEAD. A pre-push barrier proves both callbacks ran.

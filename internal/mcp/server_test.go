@@ -78,6 +78,19 @@ func TestToolsSchemasAndRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(r.args, []string{"next", "--type", "bug", "--mine"}) {
 		t.Fatal(r.args)
 	}
+	call("update", map[string]any{"id": "abc123", "action": "move_group", "group": "auth"})
+	if !reflect.DeepEqual(r.args, []string{"mv", "abc123", "auth"}) {
+		t.Fatal(r.args)
+	}
+	previous := append([]string(nil), r.args...)
+	out = call("update", map[string]any{"id": "abc123", "action": "move", "group": "auth"})
+	if !out.IsError || !reflect.DeepEqual(r.args, previous) {
+		t.Fatal("folder movement must never accidentally rerank", r.args)
+	}
+	call("update", map[string]any{"id": "abc123", "add_deps": []string{"def456"}, "remove_deps": []string{"old789"}})
+	if !reflect.DeepEqual(r.args, []string{"dep", "abc123", "--add", "def456", "--remove", "old789"}) {
+		t.Fatal(r.args)
+	}
 	out = call("done", map[string]any{"id": "abc123"})
 	if !out.IsError {
 		t.Fatal("error should be a tool error")

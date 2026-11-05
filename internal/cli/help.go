@@ -10,7 +10,7 @@ func commandHelp(command string) string {
 		"show": "show ID", "edit": "edit ID", "move": "move ID (--before ID | --after ID | --top)", "mv": "mv ID GROUP",
 		"take": "take ID", "done": "done ID", "check": "check ID N", "note": `note ID "text"`,
 		"set":  `set ID [--title "title"] [--type TYPE] [--priority LABEL] [--label LABEL] [--status STATUS] [--assignee NAME]`,
-		"drop": "drop ID", "next": "next [--type TYPE] [--priority LABEL] [--label LABEL] [--group FOLDER] [--mine]",
+		"drop": "drop ID", "dep": "dep ID [--add REF ...] [--remove REF ...]", "next": "next [--type TYPE] [--priority LABEL] [--label LABEL] [--group FOLDER] [--mine]",
 		"rebalance": "rebalance [ID ...]", "types": "types", "lint": "lint", "sync": "sync", "import": "import backlog DIRECTORY", "tui": "tui", "mcp": "mcp", "help": "help [COMMAND]",
 	}
 	details := map[string]string{
@@ -25,6 +25,7 @@ func commandHelp(command string) string {
 		"check":     "Ticks acceptance item N, numbered from 1 in show output. Repeating it succeeds.\nExample: huginn check k7m2qx 1\n",
 		"note":      "Appends text to Notes, preserving existing content.\nExample: huginn note k7m2qx \"Blocked on p3rt9a; waiting for API\"\n",
 		"set":       "Types: feature|bug|chore|spike|docs. Statuses: todo|doing|done|dropped.\nPriority is a free label. --label and --assignee replace the field with one value.\nStatus done still enforces dependencies and acceptance. Use take to claim work.\n",
+		"dep":       "Add or remove dependency references, stored as immutable ids. Repeat --add/--remove.\nRepeats are no-ops. A dependency cycle blocks with exit 3 and an exact fix.\nExample: huginn dep k7m2qx --add p3rt9a\n",
 		"drop":      "Marks a task dropped even when blocked. Does not delete the file. Repeating it succeeds.\n",
 		"next":      "Plain next: highest-ranked unblocked, unassigned todo. Exit 4 when none match.\n--mine: my unblocked doing first, then todo, in rank order. Filters combine.\nTypes: feature|bug|chore|spike|docs. Priority is a free label.\n",
 		"rebalance": "Rekeys ranked filenames without changing task contents. Usually unnecessary.\n",

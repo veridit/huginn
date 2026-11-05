@@ -32,6 +32,7 @@ Use --json with any command. IDs, unique prefixes, slugs and aliases work.
   done                      huginn done k7m2qx
   check                     huginn check k7m2qx 1
   note                      huginn note k7m2qx "Test evidence"
+  dep                       huginn dep k7m2qx --add p3rt9a
   set                       huginn set k7m2qx --priority high --label api
   drop                      huginn drop k7m2qx
   next                      huginn next --type bug --priority high --group auth
@@ -50,7 +51,7 @@ Exit: 0 success, 1 error, 2 usage, 3 blocked, 4 no next task.
 next: huginn next
 `
 
-var Commands = []string{"init", "new", "ls", "show", "edit", "move", "mv", "take", "done", "check", "note", "set", "drop", "next", "rebalance", "types", "lint", "sync", "import", "tui", "mcp", "help"}
+var Commands = []string{"init", "new", "ls", "show", "edit", "move", "mv", "take", "done", "check", "note", "dep", "set", "drop", "next", "rebalance", "types", "lint", "sync", "import", "tui", "mcp", "help"}
 
 type UsageError struct{ Problem, Fix string }
 type OperationError struct{ Problem, Fix string }
@@ -292,7 +293,7 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		e := task.Invalid("command", cmd, Commands)
 		return nil, usage("unknown command "+cmd+"; valid: "+strings.Join(Commands, ", ")+"; closest: "+e.Closest, "huginn "+e.Closest+" --help")
 	}
-	allowed := map[string]string{"new": "type priority goal accept dep group label top after", "ls": "status type priority label group mine", "next": "type priority label group mine", "move": "before after top", "set": "priority type label status title assignee"}
+	allowed := map[string]string{"new": "type priority goal accept dep group label top after", "ls": "status type priority label group mine", "next": "type priority label group mine", "move": "before after top", "dep": "add remove", "set": "priority type label status title assignee"}
 	f, e := parse(args, allowed[cmd])
 	if e != nil {
 		return nil, e
@@ -453,6 +454,14 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 			return nil, e
 		}
 		r, e = a.take(ctx, s, f.args[0])
+	case "dep":
+		if e = f.count(1); e != nil {
+			return nil, e
+		}
+		if !f.has("add") && !f.has("remove") {
+			return nil, usage("dep needs --add REF or --remove REF", "huginn dep "+f.args[0]+" --help")
+		}
+		r, e = changeDependencies(s.s, f.args[0], f.values["add"], f.values["remove"])
 	case "done", "drop":
 		if e = f.count(1); e != nil {
 			return nil, e
@@ -507,6 +516,9 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 	case "move":
 		if e = f.count(1); e != nil {
 			return nil, e
+		}
+		if !f.has("before") && !f.has("after") && !f.has("top") {
+			return nil, usage("move needs --before ID, --after ID or --top; use mv for a group change", "huginn move "+f.args[0]+" --help")
 		}
 		r, e = s.s.Move(f.args[0], task.MoveOptions{Before: f.get("before"), After: f.get("after"), Top: f.has("top")})
 	case "mv":
@@ -612,7 +624,7 @@ func ErrorDetails(err error) (int, string, string) {
 			problem += fmt.Sprintf("; %d. %s", v.Index, v.Text)
 			fixes = append(fixes, v.Fix)
 		}
-		if len(fixes) > 0 {
+		if len(fixes) > 0 && len(t.Cycle) == 0 {
 			fix = strings.Join(fixes, " && ")
 		}
 	}
