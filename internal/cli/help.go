@@ -5,7 +5,9 @@ import "strings"
 // Command help is self-contained so agents never need to hand-format Markdown.
 func commandHelp(command string) string {
 	usage := map[string]string{
-		"init": "init", "new": `new "title" --goal "outcome" --accept "observable check" [flags]`,
+		"install":   "install jcode [--all-instances | --jcode-home PATH] [--dry-run]",
+		"uninstall": "uninstall jcode [--all-instances | --jcode-home PATH] [--dry-run]",
+		"init":      "init", "new": `new "title" --goal "outcome" --accept "observable check" [flags]`,
 		"ls":   "ls [--status todo|doing|done|dropped] [--type TYPE] [--priority LABEL] [--label LABEL] [--group FOLDER] [--mine]",
 		"show": "show ID", "edit": "edit ID", "move": "move ID (--before ID | --after ID | --top)", "mv": "mv ID GROUP",
 		"take": "take ID", "done": "done ID", "check": "check ID N", "note": `note ID "text"`,
@@ -14,6 +16,8 @@ func commandHelp(command string) string {
 		"rebalance": "rebalance [ID ...]", "types": "types", "lint": "lint", "sync": "sync", "import": "import backlog DIRECTORY", "tui": "tui", "mcp": "mcp", "help": "help [COMMAND]",
 	}
 	details := map[string]string{
+		"install":   "Adds huginn -> huginn mcp to Jcode mcp.json. Keeps a timestamped backup and other servers. Default: JCODE_HOME or ~/.jcode. --all-instances discovers the static zsh registry. Restart Jcode afterward.\n",
+		"uninstall": "Removes only the huginn MCP entry, keeping backups and other servers. Same instance selection as install.\n",
 		"new":       "Required: --goal TEXT and at least one --accept TEXT. Repeat --accept for each check.\nOptional: --type feature|bug|chore|spike|docs (default feature), --priority LABEL.\nRepeat --dep REF for dependencies and --label LABEL for labels.\nUse --group FOLDER, --top, or --after REF to choose placement.\nExample: huginn new \"Form\" --goal \"Submit works\" --accept \"Saved\" --dep k7m2qx --group auth\n",
 		"ls":        "All statuses are included unless filtered. Filters combine.\n--mine uses HUGINN_USER, otherwise git config user.name.\n",
 		"show":      "Shows goal, notes, numbered acceptance and dependency ids with current titles/statuses/paths.\n",

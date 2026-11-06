@@ -13,6 +13,34 @@ import (
 
 type recorder struct{ args []string }
 
+func TestOutsideRepositoryToolError(t *testing.T) {
+	ctx := context.Background()
+	s := New(&cli.App{Cwd: t.TempDir()})
+	ct, st := sdk.NewInMemoryTransports()
+	ss, err := s.Connect(ctx, st, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ss.Close()
+	c := sdk.NewClient(&sdk.Implementation{Name: "test", Version: "1"}, nil)
+	cs, err := c.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	r, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "list", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.IsError {
+		t.Fatal("tool unexpectedly succeeded")
+	}
+	b, _ := json.Marshal(r)
+	if !strings.Contains(string(b), "Git checkout") || !strings.Contains(string(b), "huginn init") {
+		t.Fatal(string(b))
+	}
+}
+
 func (r *recorder) Execute(_ context.Context, args []string) (cli.Reply, error) {
 	r.args = args
 	if args[0] == "done" {

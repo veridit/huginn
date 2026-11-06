@@ -16,6 +16,7 @@ import (
 
 	"github.com/veridit/huginn/gitbranch"
 	"github.com/veridit/huginn/internal/cache"
+	"github.com/veridit/huginn/internal/harness"
 	"github.com/veridit/huginn/internal/task"
 )
 
@@ -43,6 +44,9 @@ Use --json with any command. IDs, unique prefixes, slugs and aliases work.
   import                    huginn import backlog ./backlog
   tui                       huginn tui
   mcp                       huginn mcp
+  install                   huginn install jcode --all-instances
+  uninstall                 huginn uninstall jcode
+  version                   huginn version
   help                      huginn help
 New flags: --dep ID (repeatable), --group FOLDER, --label LABEL, --top, --after ID.
 Details: huginn help COMMAND (for every flat flag and examples).
@@ -51,7 +55,7 @@ Exit: 0 success, 1 error, 2 usage, 3 blocked, 4 no next task.
 next: huginn next
 `
 
-var Commands = []string{"init", "new", "ls", "show", "edit", "move", "mv", "take", "done", "check", "note", "dep", "set", "drop", "next", "rebalance", "types", "lint", "sync", "import", "tui", "mcp", "help"}
+var Commands = []string{"init", "new", "ls", "show", "edit", "move", "mv", "take", "done", "check", "note", "dep", "set", "drop", "next", "rebalance", "types", "lint", "sync", "import", "tui", "mcp", "install", "uninstall", "help"}
 
 type UsageError struct{ Problem, Fix string }
 type OperationError struct{ Problem, Fix string }
@@ -90,6 +94,9 @@ func (a *App) open(ctx context.Context) (*session, error) {
 	cwd := a.Cwd
 	if cwd == "" {
 		cwd = "."
+	}
+	if check := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--show-toplevel"); check.Run() != nil {
+		return nil, &OperationError{Problem: "Huginn needs a Git checkout as its working directory", Fix: "cd /path/to/your/git/repo && huginn init"}
 	}
 	r, e := gitbranch.Open(cwd, "huginn", ".huginn")
 	if e != nil {
@@ -179,7 +186,7 @@ func parse(args []string, allowed string) (flags, error) {
 			e := task.Invalid("flag", key, valid)
 			return f, usage("unknown flag --"+key+"; valid: --"+strings.Join(valid, ", --")+"; closest: --"+e.Closest, "huginn help")
 		}
-		if slices.Contains([]string{"json", "help", "mine", "top"}, key) {
+		if slices.Contains([]string{"json", "help", "mine", "top", "dry-run", "all-instances"}, key) {
 			if eq && val != "true" {
 				return f, usage("--"+key+" is a boolean flag", "huginn help")
 			}
@@ -293,7 +300,7 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 		e := task.Invalid("command", cmd, Commands)
 		return nil, usage("unknown command "+cmd+"; valid: "+strings.Join(Commands, ", ")+"; closest: "+e.Closest, "huginn "+e.Closest+" --help")
 	}
-	allowed := map[string]string{"new": "type priority goal accept dep group label top after", "ls": "status type priority label group mine", "next": "type priority label group mine", "move": "before after top", "dep": "add remove", "set": "priority type label status title assignee"}
+	allowed := map[string]string{"install": "all-instances jcode-home dry-run", "uninstall": "all-instances jcode-home dry-run", "new": "type priority goal accept dep group label top after", "ls": "status type priority label group mine", "next": "type priority label group mine", "move": "before after top", "dep": "add remove", "set": "priority type label status title assignee"}
 	f, e := parse(args, allowed[cmd])
 	if e != nil {
 		return nil, e
@@ -326,6 +333,9 @@ func (a *App) Execute(ctx context.Context, args []string) (Reply, error) {
 			return nil, e
 		}
 		return Reply{"types": task.TypeDescriptions, "next": "huginn next"}, nil
+	}
+	if cmd == "install" || cmd == "uninstall" {
+		return a.runInstall(cmd, f)
 	}
 	s, e := a.open(ctx)
 	if e != nil {
@@ -671,6 +681,11 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	if jsonMode {
 		_ = json.NewEncoder(a.Out).Encode(reply)
 		return 0
+	}
+	if rs, ok := reply["installations"].([]harness.InstallResult); ok {
+		for _, r := range rs {
+			fmt.Fprintf(a.Out, "%s changed=%t backup=%s dry-run=%v\n", r.File, r.Changed, r.Backup, reply["dry_run"])
+		}
 	}
 	if h, ok := reply["help"].(string); ok {
 		fmt.Fprint(a.Out, h)
