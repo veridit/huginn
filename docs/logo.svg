@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="t">
+<title id="t">huginn: raven of thought</title>
+<rect width="256" height="256" rx="56" fill="#f3ead8"/>
+<circle cx="128" cy="128" r="96" fill="none" stroke="#b8862e" stroke-width="3"/>
+<path fill="#14161c" d="M216 91 L183 80 C173 63 147 64 134 79 C123 91 124 109 111 120 L48 180 L65 179 L59 197 L90 178 C113 184 143 169 157 145 L169 122 L183 126 L178 112 L188 112 L182 102 Z"/>
+<path d="M141 110 Q119 143 86 164" fill="none" stroke="#3a3f4c" stroke-width="4" stroke-linecap="round"/>
+<circle cx="165" cy="84" r="5" fill="#d9a441"/>
+<path d="M132 168 L132 193 M145 161 L148 193 M118 194 H161" fill="none" stroke="#14161c" stroke-width="5" stroke-linecap="round"/>
+<g fill="none" stroke="#b8862e" stroke-width="4" stroke-linecap="round"><path d="M48 70 l5 5 9 -12 M48 92 l5 5 9 -12 M70 70 h24 M70 92 h17"/></g>
+</svg>
