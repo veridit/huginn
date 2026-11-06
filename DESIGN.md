@@ -4,7 +4,11 @@ Huginn is Odin's raven of thought. muninn remembers; huginn keeps you heading
 straight. A fast, crash-proof task tracker for people and agents, one markdown
 file per task, kept on its own git branch.
 
-Status: DRAFT. Q1-Q5 decided by the user 2026-11-05 13:36 (see Decisions).
+Status: BUILT (2026-11-06). Core, git, CLI+MCP, TUI and backlog-md import are
+implemented and CI-green on Linux, macOS and Windows. Not yet released. The
+cheap-model acceptance gate (D13) is the release bar. Decisions D1-D21 below are
+the current spec; where two disagree, the later one wins and the earlier one
+says so.
 
 ## Decisions (user, 2026-11-05 13:36)
 
@@ -17,9 +21,9 @@ Status: DRAFT. Q1-Q5 decided by the user 2026-11-05 13:36 (see Decisions).
 - **D3 `next` exists, with filters**: `huginn next --type bug`, `--label`,
   `--mine`. Adds a `type:` field: `feature | bug | chore | spike | docs`,
   fixed list, each with a one-line description shown by `huginn types`.
-- **D4 project memories move to the same branch**: muninn writes
-  `memories/` in the `.huginn/` worktree (one shared branch, call it the
-  project-notes branch). Main gets no memory commits, no churn, no pollution.
+- **D4 SUPERSEDED by D6** (one branch per tool). Original text: project
+  memories move to a shared branch with tasks. Still true: main gets no
+  memory or task commits.
 - **D5 TUI now, web UI later** for both tools. The web UI runs locally
   (`huginn serve`, `muninn serve`) so it can be opened from vendor apps
   (Claude, ChatGPT/Codex, ...) to view and edit tasks and memories.
@@ -253,7 +257,7 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
 - `ls` on 10k tasks: < 50 ms warm (cache), < 1 s cold.
 - `new`/`move`/`done`: < 20 ms excluding git push.
 
-## Decisions log continues above; open questions: none (2026-11-05 15:52)
+## Decisions log continued (D6, D11-D21)
 
 - **D6 (user, 15:47) one branch per tool, not a shared `ravens` branch.**
   Tasks live on branch `huginn` (worktree `.huginn/`), memories on branch
@@ -262,6 +266,10 @@ Free text, evidence, decisions. Any other `##` sections are kept as-is.
   binaries). Consequence for muninn: today `.muninn/memories.jsonl` is tracked
   on main; migration removes it from main in one commit and moves it onto the
   `muninn` branch. This supersedes D4's "same branch" wording.
+  OPEN (2026-11-06): `.muninn/` already holds local marker files
+  (`.muninn/project`, `.muninn/client`), so the muninn worktree cannot be
+  `.muninn/` itself. Proposed: worktree at `.muninn/notes/`, markers beside
+  it, whole `.muninn/` in `.git/info/exclude`. Awaiting user.
 - **D11 (user 15:52) rank stays in the file name.**
 - **D12 (user 15:52) `next` orders by rank; filters narrow it.** `huginn
   next` returns the top-ranked unblocked, untaken todo. Filters combine:
