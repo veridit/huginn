@@ -11,8 +11,14 @@ import (
 	"github.com/veridit/huginn/internal/mcp"
 )
 
+var version = "v0.1.0"
+
 func main() { os.Exit(run()) }
 func run() int {
+	if len(os.Args) == 2 && os.Args[1] == "version" {
+		fmt.Println("huginn " + version)
+		return 0
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	cwd, e := os.Getwd()

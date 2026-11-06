@@ -1,0 +1,42 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: No-secrets gate
+        run: ./scripts/check-secrets.sh --all
+      - name: Test
+        run: go test ./...
+      - name: Build all platforms
+        run: ./scripts/build-release.sh "${GITHUB_REF_NAME}"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --title "${GITHUB_REF_NAME}"
+      - name: Update Homebrew formula and Scoop manifest
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh && printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap && chmod 600 ~/.ssh/tap
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:veridit/homebrew-tap.git tap
+          ./scripts/package-managers.sh "${GITHUB_REF_NAME}" dist/SHA256SUMS tap
+          cd tap
+          git config user.name "huginn release"
+          git config user.email "huginn-release@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "huginn ${GITHUB_REF_NAME}"
+          git push origin HEAD
+          rm -f ~/.ssh/tap
