@@ -50,15 +50,19 @@ func (a *App) runInstall(cmd string, f flags) (Reply, error) {
 		}
 		homes = []string{h}
 	}
+	bin, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
 	// Preflight every instance before modifying any of them.
 	for _, h := range homes {
-		if _, err := harness.InstallJcodeHome(h, cmd == "install", true); err != nil {
+		if _, err := harness.InstallJcodeHome(h, bin, cmd == "install", true); err != nil {
 			return nil, err
 		}
 	}
 	results := []harness.InstallResult{}
 	for _, h := range homes {
-		r, err := harness.InstallJcodeHome(h, cmd == "install", f.has("dry-run"))
+		r, err := harness.InstallJcodeHome(h, bin, cmd == "install", f.has("dry-run"))
 		if err != nil {
 			return nil, err
 		}

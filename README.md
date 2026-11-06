@@ -89,9 +89,12 @@ huginn install jcode --jcode-home /path/to/.jcode
 huginn uninstall jcode
 ```
 
-Restart the agent after changing configuration. The `huginn` executable must be
-on the agent's PATH. MCP tools use the same validation, completion checks and
-next-step hints as the CLI.
+Restart the agent after changing configuration. The installer records the
+absolute path of the running Huginn executable with `args: ["mcp"]` and `env: {}`.
+It preserves an existing `servers` or `mcpServers` schema, defaults to `servers`,
+and repairs v0.1.0 mixed-schema files without dropping other servers. Re-run the
+installer after upgrading Huginn if its executable path changes. MCP tools use
+the same validation, completion checks and next-step hints as the CLI.
 
 ## Import backlog-md
 

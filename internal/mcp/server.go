@@ -25,7 +25,7 @@ type Executor interface {
 
 // New creates ten flat tools with the CLI's canonical JSON contract and errors.
 func New(e Executor) *sdk.Server {
-	s := sdk.NewServer(&sdk.Implementation{Name: "huginn", Version: "0.1.0"}, &sdk.ServerOptions{Instructions: Instructions})
+	s := sdk.NewServer(&sdk.Implementation{Name: "huginn", Version: "0.1.1"}, &sdk.ServerOptions{Instructions: Instructions})
 	var mu sync.Mutex
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 	enum := func(values ...string) map[string]any { return map[string]any{"type": "string", "enum": values} }

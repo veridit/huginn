@@ -11,7 +11,7 @@ import (
 	"github.com/veridit/huginn/internal/mcp"
 )
 
-var version = "v0.1.0"
+var version = "v0.1.1"
 
 func main() { os.Exit(run()) }
 func run() int {

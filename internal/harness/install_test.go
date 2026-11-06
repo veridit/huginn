@@ -15,7 +15,7 @@ func TestInstallLifecycle(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := InstallJcodeHome(home, true, true)
+	r, err := installTest(home, true, true)
 	if err != nil || !r.Changed {
 		t.Fatal(r, err)
 	}
@@ -27,7 +27,7 @@ func TestInstallLifecycle(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatal("dry run wrote files")
 	}
-	r, err = InstallJcodeHome(home, true, false)
+	r, err = installTest(home, true, false)
 	if err != nil || !r.Changed || r.Backup == "" {
 		t.Fatal(r, err)
 	}
@@ -48,7 +48,7 @@ func TestInstallLifecycle(t *testing.T) {
 	if len(servers) != 2 || !bytes.Contains(servers["huginn"], []byte(`"mcp"`)) {
 		t.Fatal(string(installed))
 	}
-	r, err = InstallJcodeHome(home, true, false)
+	r, err = installTest(home, true, false)
 	if err != nil || r.Changed {
 		t.Fatal(r, err)
 	}
@@ -56,7 +56,7 @@ func TestInstallLifecycle(t *testing.T) {
 	if !bytes.Equal(again, installed) {
 		t.Fatal("non-idempotent install")
 	}
-	r, err = InstallJcodeHome(home, false, true)
+	r, err = installTest(home, false, true)
 	if err != nil || !r.Changed {
 		t.Fatal(r, err)
 	}
@@ -64,7 +64,7 @@ func TestInstallLifecycle(t *testing.T) {
 	if !bytes.Equal(again, installed) {
 		t.Fatal("dry uninstall wrote")
 	}
-	r, err = InstallJcodeHome(home, false, false)
+	r, err = installTest(home, false, false)
 	if err != nil || !r.Changed {
 		t.Fatal(r, err)
 	}
@@ -77,7 +77,7 @@ func TestInstallLifecycle(t *testing.T) {
 	if len(servers) != 1 || servers["other"] == nil {
 		t.Fatal(string(b))
 	}
-	r, err = InstallJcodeHome(home, false, false)
+	r, err = installTest(home, false, false)
 	if err != nil || r.Changed {
 		t.Fatal(r, err)
 	}
@@ -89,7 +89,7 @@ func TestMalformedAndConflictingConfigs(t *testing.T) {
 			home := t.TempDir()
 			path := filepath.Join(home, "mcp.json")
 			os.WriteFile(path, []byte(input), 0o600)
-			if _, err := InstallJcodeHome(home, true, false); err == nil {
+			if _, err := installTest(home, true, false); err == nil {
 				t.Fatal("accepted unsafe config")
 			}
 			b, _ := os.ReadFile(path)
@@ -106,19 +106,19 @@ func TestMissingAndDiscovery(t *testing.T) {
 		t.Fatal(got)
 	}
 	target := filepath.Join(home, ".jcode")
-	if r, e := InstallJcodeHome(target, false, false); e != nil || r.Changed {
+	if r, e := installTest(target, false, false); e != nil || r.Changed {
 		t.Fatal(r, e)
 	}
 	if _, e := os.Stat(target); !os.IsNotExist(e) {
 		t.Fatal("uninstall created directory")
 	}
-	if r, e := InstallJcodeHome(target, true, true); e != nil || !r.Changed {
+	if r, e := installTest(target, true, true); e != nil || !r.Changed {
 		t.Fatal(r, e)
 	}
 	if _, e := os.Stat(target); !os.IsNotExist(e) {
 		t.Fatal("dry install created directory")
 	}
-	if _, e := InstallJcodeHome(target, true, false); e != nil {
+	if _, e := installTest(target, true, false); e != nil {
 		t.Fatal(e)
 	}
 	project := filepath.Join(home, "project space")

@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "muninn": {
+      "command": "/example/bin/muninn",
+      "args": ["mcp"],
+      "env": {}
+    }
+  }
+}

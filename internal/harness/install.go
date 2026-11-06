@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"time"
 )
 
@@ -19,7 +18,7 @@ type InstallResult struct {
 
 // InstallJcodeHome changes only the huginn server. Backups are private, uniquely
 // named, and written before atomic replacement of an existing configuration.
-func InstallJcodeHome(home string, install, dry bool) (InstallResult, error) {
+func InstallJcodeHome(home, bin string, install, dry bool) (InstallResult, error) {
 	path := filepath.Join(home, "mcp.json")
 	res := InstallResult{File: path}
 	if fi, err := os.Lstat(path); err == nil && !fi.Mode().IsRegular() {
@@ -42,37 +41,13 @@ func InstallJcodeHome(home string, install, dry bool) (InstallResult, error) {
 			return res, fmt.Errorf("%s must be a JSON object", path)
 		}
 	}
-	servers := map[string]json.RawMessage{}
-	if raw, ok := root["mcpServers"]; ok {
-		if err := json.Unmarshal(raw, &servers); err != nil || servers == nil {
-			return res, fmt.Errorf("%s: mcpServers must be an object", path)
-		}
-	}
-	want := json.RawMessage(`{"command":"huginn","args":["mcp"]}`)
-	old, found := servers["huginn"]
-	if install {
-		var a, b any
-		_ = json.Unmarshal(old, &a)
-		_ = json.Unmarshal(want, &b)
-		if found && reflect.DeepEqual(a, b) {
-			return res, nil
-		}
-		// Never silently replace an unrelated server using the same name.
-		if found {
-			return res, fmt.Errorf("%s: huginn server already has a different configuration; rename it or uninstall it explicitly first", path)
-		}
-		servers["huginn"] = want
-	} else {
-		if !found {
-			return res, nil
-		}
-		delete(servers, "huginn")
-	}
-	raw, err := json.Marshal(servers)
+	changed, err := editServers(root, bin, install)
 	if err != nil {
-		return res, err
+		return res, fmt.Errorf("%s: %w", path, err)
 	}
-	root["mcpServers"] = raw
+	if !changed {
+		return res, nil
+	}
 	out, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return res, err
